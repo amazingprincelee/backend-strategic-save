@@ -92,8 +92,7 @@ const notificationSchema = new mongoose.Schema({
     default: function() {
       // Notifications expire after 30 days by default
       return new Date(Date.now() + 30 * 24 * 60 * 60 * 1000);
-    },
-    index: true
+    }
   }
 }, {
   timestamps: true,

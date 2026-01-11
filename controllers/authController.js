@@ -9,6 +9,9 @@ import {
 
 // Register new user
 export const register = async (req, res) => {
+ console.log("I got hit o");
+ 
+
   try {
     // Validate request data
     const validatedData = await userRegistrationSchema.validate(req.body, {
@@ -127,6 +130,7 @@ export const register = async (req, res) => {
 
 // Login user
 export const login = async (req, res) => {
+   console.log("I got hit o");
   try {
     // Validate request data
     const validatedData = await userLoginSchema.validate(req.body, {

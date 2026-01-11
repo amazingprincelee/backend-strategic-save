@@ -31,10 +31,16 @@ dotenv.config();
 const app = express();
 const server = createServer(app);
 
-// Initialize Socket.IO
+// Initialize Socket.IO - UPDATED WITH PROPER CONFIG
 const io = new Server(server, {
-  cors: corsOptions,
-  transports: ['websocket', 'polling']
+  cors: {
+    origin: process.env.CLIENT_URL || corsOptions.origin || 'http://localhost:5173',
+    methods: ['GET', 'POST'],
+    credentials: true,
+  },
+  path: '/socket.io/', // Added explicit path
+  transports: ['websocket', 'polling'],
+  allowEIO3: true, // Enable compatibility
 });
 
 // Trust proxy (important for rate limiting and IP detection)
@@ -68,6 +74,7 @@ if (process.env.NODE_ENV === 'development') {
 }
 
 // Make io accessible to routes
+app.set('io', io); // Added app.set for consistency
 app.use((req, res, next) => {
   req.io = io;
   next();
@@ -80,14 +87,14 @@ app.use('/api', apiRoutes);
 app.get('/', (req, res) => {
   res.json({
     success: true,
-    message: 'Strategic Crypto Save API',
+    message: 'Strategic Crypto Trader API',
     version: '1.0.0',
     documentation: '/api/health',
     timestamp: new Date().toISOString()
   });
 });
 
-// Socket.IO connection handling
+// Socket.IO connection handling - KEPT YOUR ORIGINAL LOGIC
 io.on('connection', (socket) => {
   console.log(`Client connected: ${socket.id}`);
 
@@ -143,6 +150,7 @@ const startServer = async () => {
       console.log(`📱 Environment: ${process.env.NODE_ENV || 'development'}`);
       console.log(`🌐 API URL: http://localhost:${PORT}/api`);
       console.log(`🔌 Socket.IO URL: http://localhost:${PORT}`);
+      console.log(`🔌 Socket.IO Path: /socket.io/`); // Added for clarity
     });
 
   } catch (error) {

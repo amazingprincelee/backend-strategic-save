@@ -152,8 +152,7 @@ const vaultSchema = new mongoose.Schema({
   status: {
     type: String,
     enum: ['active', 'unlocked', 'withdrawn', 'emergency'],
-    default: 'active',
-    index: true
+    default: 'active'
   },
   
   // Notification tracking
