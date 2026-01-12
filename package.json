@@ -35,6 +35,7 @@
     "npm": ">=8.0.0"
   },
   "dependencies": {
+    "axios": "^1.13.2",
     "bcryptjs": "^2.4.3",
     "ccxt": "^4.5.32",
     "compression": "^1.7.4",

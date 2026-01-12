@@ -1,114 +1,96 @@
-import ccxt from 'ccxt';
+// Controller: arbitrageController.js (CoinGecko Version)
+// Uses CoinGecko FREE API - NO API KEY NEEDED!
 
-// Initialize exchanges with CCXT
-const initializeExchanges = () => {
-  const exchanges = {
-    binance: new ccxt.binance({
-      enableRateLimit: true,
-      // Add API keys if needed for private endpoints
-      // apiKey: process.env.BINANCE_API_KEY,
-      // secret: process.env.BINANCE_SECRET,
-    }),
-    bybit: new ccxt.bybit({
-      enableRateLimit: true,
-      // apiKey: process.env.BYBIT_API_KEY,
-      // secret: process.env.BYBIT_SECRET,
-    }),
-    gate: new ccxt.gate({
-      enableRateLimit: true,
-      // apiKey: process.env.GATE_API_KEY,
-      // secret: process.env.GATE_SECRET,
-    }),
-    mexc: new ccxt.mexc({
-      enableRateLimit: true,
-      // apiKey: process.env.MEXC_API_KEY,
-      // secret: process.env.MEXC_SECRET,
-    }),
-    okx: new ccxt.okx({
-      enableRateLimit: true,
-      // apiKey: process.env.OKX_API_KEY,
-      // secret: process.env.OKX_SECRET,
-    }),
-    htx: new ccxt.htx({
-      enableRateLimit: true,
-      // apiKey: process.env.HTX_API_KEY,
-      // secret: process.env.HTX_SECRET,
-    }),
-    bitget: new ccxt.bitget({
-      enableRateLimit: true,
-      // apiKey: process.env.BITGET_API_KEY,
-      // secret: process.env.BITGET_SECRET,
-    }),
-    kucoin: new ccxt.kucoin({
-      enableRateLimit: true,
-      // apiKey: process.env.KUCOIN_API_KEY,
-      // secret: process.env.KUCOIN_SECRET,
-    }),
-    lbank: new ccxt.lbank({
-      enableRateLimit: true,
-      // apiKey: process.env.LBANK_API_KEY,
-      // secret: process.env.LBANK_SECRET,
-    })
-  };
+import coinGeckoService from '../services/coinGeckoArbitrageService.js';
 
-  return exchanges;
-};
-
-const EXCHANGES = initializeExchanges();
-
-// Popular trading pairs to scan
-const TRADING_PAIRS = [
-  'BTC/USDT',
-  'ETH/USDT',
-  'BNB/USDT',
-  'SOL/USDT',
-  'XRP/USDT',
-  'ADA/USDT',
-  'DOGE/USDT',
-  'MATIC/USDT',
-  'DOT/USDT',
-  'AVAX/USDT'
-];
+// Cache
+let cachedOpportunities = [];
+let cachedTopCoins = [];
+let cacheTimestamp = null;
+const CACHE_DURATION = 30000; // 30 seconds
 
 /**
- * Get arbitrage opportunities using CCXT
- * Scans multiple exchanges and finds price differences
+ * Get top coins by market cap
+ */
+export const getTopCoins = async (req, res) => {
+  try {
+    const { limit = 100 } = req.query;
+    
+    console.log(`📊 Fetching top ${limit} coins by market cap...`);
+    const coins = await coinGeckoService.getTopCoins(parseInt(limit));
+    
+    res.json({
+      success: true,
+      data: coins,
+      count: coins.length,
+      message: `Fetched top ${coins.length} coins`
+    });
+    
+  } catch (error) {
+    console.error('❌ Get top coins error:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Failed to fetch top coins',
+      error: error.message
+    });
+  }
+};
+
+/**
+ * Get arbitrage opportunities using CoinGecko
+ * Finds price differences across exchanges
  */
 export const getArbitrageOpportunities = async (req, res) => {
   try {
-    const { minProfit = 0.5, minVolume = 1000, coin } = req.query;
+    const { 
+      minProfit = 0.1, 
+      minVolume = 100, 
+      topCoins = 20 // Lower default to avoid rate limits
+    } = req.query;
 
-    // Filter trading pairs if specific coin requested
-    const pairsToScan = coin 
-      ? TRADING_PAIRS.filter(pair => pair.startsWith(coin.toUpperCase()))
-      : TRADING_PAIRS;
+    // Check cache
+    if (cachedOpportunities.length > 0 && cacheTimestamp && (Date.now() - cacheTimestamp < CACHE_DURATION)) {
+      console.log('✅ Returning cached arbitrage opportunities');
+      
+      return res.json({
+        success: true,
+        data: cachedOpportunities,
+        timestamp: new Date(cacheTimestamp).toISOString(),
+        cached: true,
+        scannedCoins: cachedTopCoins.length,
+        message: `Found ${cachedOpportunities.length} opportunities (cached)`
+      });
+    }
 
-    console.log(`🔍 Scanning ${pairsToScan.length} pairs across ${Object.keys(EXCHANGES).length} exchanges...`);
+    console.log(`🔍 Scanning top ${topCoins} coins for arbitrage...`);
+    console.log(`   Filters: minProfit=${minProfit}%, minVolume=$${minVolume}`);
 
-    // Scan exchanges for opportunities
-    const opportunities = await scanExchangesForArbitrage({
+    // Get top coins
+    const coins = await coinGeckoService.getTopCoins(parseInt(topCoins));
+    cachedTopCoins = coins;
+
+    // Extract CoinGecko IDs
+    const coinIds = coins.map(coin => coin.id);
+
+    // Find arbitrage opportunities
+    const opportunities = await coinGeckoService.findArbitrageOpportunities(coinIds, {
       minProfit: parseFloat(minProfit),
-      minVolume: parseFloat(minVolume),
-      pairs: pairsToScan
+      minVolume: parseFloat(minVolume)
     });
 
-    // Calculate stats
-    const stats = {
-      totalOpportunities: opportunities.length,
-      avgProfitMargin: opportunities.length > 0 
-        ? opportunities.reduce((acc, opp) => acc + opp.profitMargin, 0) / opportunities.length 
-        : 0,
-      activeTransfers: opportunities.filter(opp => opp.transferEnabled).length,
-      totalVolume: opportunities.reduce((acc, opp) => acc + opp.volume, 0)
-    };
+    // Cache results
+    cachedOpportunities = opportunities;
+    cacheTimestamp = Date.now();
+
+    console.log(`✅ Found ${opportunities.length} arbitrage opportunities`);
 
     res.json({
       success: true,
-      data: {
-        opportunities,
-        ...stats,
-        timestamp: new Date().toISOString()
-      }
+      data: opportunities,
+      timestamp: new Date().toISOString(),
+      cached: false,
+      scannedCoins: coins.length,
+      message: `Found ${opportunities.length} opportunities from ${coins.length} coins`
     });
 
   } catch (error) {
@@ -122,146 +104,84 @@ export const getArbitrageOpportunities = async (req, res) => {
 };
 
 /**
- * Execute arbitrage trade using CCXT
+ * Force refresh arbitrage opportunities (clears cache)
  */
-export const executeArbitrageTrade = async (req, res) => {
+export const refreshArbitrageOpportunities = async (req, res) => {
   try {
+    console.log('🔄 Force refreshing arbitrage opportunities...');
+
+    // Clear cache
+    cachedOpportunities = [];
+    cacheTimestamp = null;
+    coinGeckoService.clearCache();
+
     const { 
-      coin, 
-      amount, 
-      buyExchange, 
-      sellExchange,
-      buyPrice,
-      sellPrice 
-    } = req.body;
+      minProfit = 0.1, 
+      minVolume = 100, 
+      topCoins = 20 // Lower default
+    } = req.query;
 
-    // Validate required fields
-    if (!coin || !amount || !buyExchange || !sellExchange || !buyPrice || !sellPrice) {
-      return res.status(400).json({
-        success: false,
-        message: 'Missing required trade parameters'
-      });
-    }
+    // Get top coins
+    const coins = await coinGeckoService.getTopCoins(parseInt(topCoins));
+    const coinIds = coins.map(coin => coin.id);
 
-    const buyEx = EXCHANGES[buyExchange.toLowerCase()];
-    const sellEx = EXCHANGES[sellExchange.toLowerCase()];
+    // Find opportunities
+    const opportunities = await coinGeckoService.findArbitrageOpportunities(coinIds, {
+      minProfit: parseFloat(minProfit),
+      minVolume: parseFloat(minVolume)
+    });
 
-    if (!buyEx || !sellEx) {
-      return res.status(400).json({
-        success: false,
-        message: 'Invalid exchange(s) specified'
-      });
-    }
-
-    // Check if exchanges support required features
-    const buySupportsTrading = buyEx.has['createOrder'];
-    const sellSupportsTrading = sellEx.has['createOrder'];
-
-    if (!buySupportsTrading || !sellSupportsTrading) {
-      return res.status(400).json({
-        success: false,
-        message: 'One or both exchanges do not support trading'
-      });
-    }
-
-    // Calculate expected profit
-    const expectedProfit = (sellPrice - buyPrice) * amount;
-    const profitMargin = ((sellPrice - buyPrice) / buyPrice) * 100;
-
-    // In production, execute the actual trades:
-    // 1. Create buy order on buyExchange
-    // const buyOrder = await buyEx.createMarketBuyOrder(coin, amount);
-    
-    // 2. Wait for order to fill
-    // 3. Withdraw from buyExchange to sellExchange
-    // const withdrawal = await buyEx.withdraw(coin, amount, sellExchangeAddress);
-    
-    // 4. Wait for deposit confirmation on sellExchange
-    // 5. Create sell order on sellExchange
-    // const sellOrder = await sellEx.createMarketSellOrder(coin, amount);
-
-    // Mock successful trade for now
-    const trade = {
-      id: `ARB-${Date.now()}`,
-      userId: req.user.id,
-      coin,
-      amount,
-      buyExchange,
-      sellExchange,
-      buyPrice,
-      sellPrice,
-      profit: expectedProfit,
-      profitMargin,
-      status: 'completed',
-      executedAt: new Date().toISOString()
-    };
+    // Update cache
+    cachedOpportunities = opportunities;
+    cachedTopCoins = coins;
+    cacheTimestamp = Date.now();
 
     res.json({
       success: true,
-      message: 'Arbitrage trade executed successfully',
-      data: trade
+      data: opportunities,
+      timestamp: new Date().toISOString(),
+      cached: false,
+      scannedCoins: coins.length,
+      message: `Refreshed! Found ${opportunities.length} opportunities`
     });
 
   } catch (error) {
-    console.error('❌ Execute arbitrage trade error:', error);
+    console.error('❌ Refresh error:', error);
     res.status(500).json({
       success: false,
-      message: 'Failed to execute arbitrage trade',
+      message: 'Failed to refresh opportunities',
       error: error.message
     });
   }
 };
 
 /**
- * Get exchange connection status using CCXT
+ * Get available exchanges (from CoinGecko data)
  */
 export const getExchangeStatus = async (req, res) => {
   try {
-    const exchangeStatuses = await Promise.all(
-      Object.entries(EXCHANGES).map(async ([key, exchange]) => {
-        try {
-          const startTime = Date.now();
-          
-          // Test connection by fetching a ticker
-          await exchange.fetchTicker('BTC/USDT');
-          
-          const latency = Date.now() - startTime;
-
-          // Check exchange capabilities
-          const capabilities = {
-            fetchTicker: exchange.has['fetchTicker'],
-            fetchOrderBook: exchange.has['fetchOrderBook'],
-            fetchTrades: exchange.has['fetchTrades'],
-            createOrder: exchange.has['createOrder'],
-            withdraw: exchange.has['withdraw'],
-            deposit: exchange.has['deposit']
-          };
-
-          return {
-            id: key,
-            name: exchange.name,
-            connected: true,
-            transferEnabled: capabilities.withdraw && capabilities.deposit,
-            latency,
-            capabilities,
-            lastChecked: new Date().toISOString()
-          };
-        } catch (error) {
-          return {
-            id: key,
-            name: exchange.name,
-            connected: false,
-            transferEnabled: false,
-            lastChecked: new Date().toISOString(),
-            error: error.message
-          };
-        }
-      })
-    );
+    // CoinGecko shows prices from 50+ exchanges
+    // We'll list the most common ones
+    const exchanges = [
+      { id: 'binance', name: 'Binance', connected: true, source: 'CoinGecko' },
+      { id: 'coinbase-exchange', name: 'Coinbase', connected: true, source: 'CoinGecko' },
+      { id: 'kraken', name: 'Kraken', connected: true, source: 'CoinGecko' },
+      { id: 'kucoin', name: 'KuCoin', connected: true, source: 'CoinGecko' },
+      { id: 'okx', name: 'OKX', connected: true, source: 'CoinGecko' },
+      { id: 'bybit_spot', name: 'Bybit', connected: true, source: 'CoinGecko' },
+      { id: 'gate', name: 'Gate.io', connected: true, source: 'CoinGecko' },
+      { id: 'mexc', name: 'MEXC', connected: true, source: 'CoinGecko' },
+      { id: 'huobi', name: 'HTX (Huobi)', connected: true, source: 'CoinGecko' },
+      { id: 'bitget', name: 'Bitget', connected: true, source: 'CoinGecko' },
+      { id: 'gemini', name: 'Gemini', connected: true, source: 'CoinGecko' },
+      { id: 'bitfinex', name: 'Bitfinex', connected: true, source: 'CoinGecko' },
+      { id: 'crypto_com', name: 'Crypto.com', connected: true, source: 'CoinGecko' }
+    ];
 
     res.json({
       success: true,
-      data: exchangeStatuses
+      data: exchanges,
+      message: 'CoinGecko provides data from 50+ exchanges'
     });
 
   } catch (error) {
@@ -275,14 +195,13 @@ export const getExchangeStatus = async (req, res) => {
 };
 
 /**
- * Get user's arbitrage history
+ * Get arbitrage history
  */
 export const getArbitrageHistory = async (req, res) => {
   try {
     const { limit = 50, page = 1 } = req.query;
 
-    // In production, fetch from database
-    // For now, return empty array
+    // TODO: Implement database storage for trade history
     const history = [];
     const total = 0;
 
@@ -298,21 +217,20 @@ export const getArbitrageHistory = async (req, res) => {
     });
 
   } catch (error) {
-    console.error('❌ Get arbitrage history error:', error);
+    console.error('❌ Get history error:', error);
     res.status(500).json({
       success: false,
-      message: 'Failed to fetch arbitrage history',
+      message: 'Failed to fetch history',
       error: error.message
     });
   }
 };
 
 /**
- * Get user's arbitrage statistics
+ * Get arbitrage statistics
  */
 export const getArbitrageStats = async (req, res) => {
   try {
-    // In production, calculate from database
     const stats = {
       totalTrades: 0,
       successfulTrades: 0,
@@ -330,158 +248,81 @@ export const getArbitrageStats = async (req, res) => {
     });
 
   } catch (error) {
-    console.error('❌ Get arbitrage stats error:', error);
+    console.error('❌ Get stats error:', error);
     res.status(500).json({
       success: false,
-      message: 'Failed to fetch arbitrage statistics',
+      message: 'Failed to fetch stats',
       error: error.message
     });
   }
 };
 
 /**
- * Scan exchanges for arbitrage opportunities using CCXT
+ * Execute arbitrage trade
  */
-async function scanExchangesForArbitrage({ minProfit, minVolume, pairs }) {
-  const opportunities = [];
-  const exchangeNames = Object.keys(EXCHANGES);
-
-  console.log(`📊 Scanning ${pairs.length} pairs across ${exchangeNames.length} exchanges...`);
-
-  for (const pair of pairs) {
-    try {
-      // Fetch prices from all exchanges in parallel
-      const pricePromises = exchangeNames.map(async (exchangeName) => {
-        try {
-          const exchange = EXCHANGES[exchangeName];
-          
-          // Fetch ticker data
-          const ticker = await exchange.fetchTicker(pair);
-          
-          // Fetch order book for depth info
-          const orderBook = await exchange.fetchOrderBook(pair, 5);
-          
-          return {
-            exchange: exchangeName,
-            exchangeObj: exchange,
-            ticker,
-            orderBook,
-            success: true
-          };
-        } catch (error) {
-          // Exchange doesn't support this pair or has an error
-          console.log(`⚠️  ${exchangeName} - ${pair}: ${error.message}`);
-          return { exchange: exchangeName, success: false };
-        }
-      });
-
-      const results = await Promise.all(pricePromises);
-      
-      // Filter successful results
-      const successfulResults = results.filter(r => r.success);
-
-      if (successfulResults.length < 2) {
-        // Need at least 2 exchanges to compare
-        continue;
-      }
-
-      // Find best buy (lowest price) and sell (highest price) opportunities
-      const sortedByPrice = successfulResults.sort((a, b) => a.ticker.last - b.ticker.last);
-      const buyOption = sortedByPrice[0]; // Lowest price
-      const sellOption = sortedByPrice[sortedByPrice.length - 1]; // Highest price
-
-      // Calculate profit
-      const buyPrice = buyOption.ticker.last;
-      const sellPrice = sellOption.ticker.last;
-      const profitMargin = ((sellPrice - buyPrice) / buyPrice) * 100;
-      const profitUSD = sellPrice - buyPrice;
-
-      // Calculate volume (use the lower of the two to be safe)
-      const buyVolume = buyOption.ticker.quoteVolume || 0;
-      const sellVolume = sellOption.ticker.quoteVolume || 0;
-      const volume = Math.min(buyVolume, sellVolume);
-
-      // Check if meets minimum criteria
-      if (profitMargin < minProfit || volume < minVolume) {
-        continue;
-      }
-
-      // Get order book depth
-      const sellOrderBookDepth = sellOption.orderBook.bids.length > 0 
-        ? sellOption.orderBook.bids[0][1] // Amount of coins at best bid
-        : 0;
-
-      // Check transfer capability
-      const buyExchange = buyOption.exchangeObj;
-      const sellExchange = sellOption.exchangeObj;
-      const transferEnabled = 
-        buyExchange.has['withdraw'] && 
-        sellExchange.has['deposit'];
-
-      // Extract coin symbol
-      const [coinSymbol, quoteSymbol] = pair.split('/');
-
-      // Create opportunity object
-      const opportunity = {
-        id: `${buyOption.exchange}-${sellOption.exchange}-${pair}-${Date.now()}`,
-        coin: coinSymbol,
-        coinName: coinSymbol, // Can enhance with full names
-        pair: pair,
-        buyExchange: buyOption.exchange.charAt(0).toUpperCase() + buyOption.exchange.slice(1),
-        sellExchange: sellOption.exchange.charAt(0).toUpperCase() + sellOption.exchange.slice(1),
-        buyPrice,
-        sellPrice,
-        profitMargin: parseFloat(profitMargin.toFixed(2)),
-        profitUSD: parseFloat(profitUSD.toFixed(8)),
-        volume: parseFloat(volume.toFixed(2)),
-        volumeCoins: sellOrderBookDepth,
-        transferEnabled,
-        lastPrice: sellPrice,
-        orderBookDepth: {
-          buy: buyOption.orderBook.asks.length,
-          sell: sellOption.orderBook.bids.length
-        },
-        timestamp: new Date().toISOString()
-      };
-
-      opportunities.push(opportunity);
-      
-      console.log(`✅ Found opportunity: ${pair} - ${profitMargin.toFixed(2)}% profit (${buyOption.exchange} → ${sellOption.exchange})`);
-
-    } catch (error) {
-      console.error(`❌ Error scanning ${pair}:`, error.message);
-    }
-  }
-
-  // Sort by profit margin (best first)
-  opportunities.sort((a, b) => b.profitMargin - a.profitMargin);
-
-  console.log(`🎉 Found ${opportunities.length} total opportunities`);
-
-  return opportunities;
-}
-
-/**
- * Helper function to check if a specific coin transfer is enabled
- */
-async function checkCoinTransferEnabled(exchange, coin) {
+export const executeArbitrageTrade = async (req, res) => {
   try {
-    const currencies = await exchange.fetchCurrencies();
-    const currency = currencies[coin];
-    
-    if (!currency) return false;
-    
-    return currency.active && !currency.info?.withdrawEnable === false;
+    const { 
+      coin, 
+      amount, 
+      buyExchange, 
+      sellExchange,
+      buyPrice,
+      sellPrice 
+    } = req.body;
+
+    // Validate
+    if (!coin || !amount || !buyExchange || !sellExchange) {
+      return res.status(400).json({
+        success: false,
+        message: 'Missing required trade parameters'
+      });
+    }
+
+    // Calculate profit
+    const expectedProfit = (sellPrice - buyPrice) * amount;
+    const profitMargin = ((sellPrice - buyPrice) / buyPrice) * 100;
+
+    // Note: Actual trading requires user's exchange API keys
+    // This is a mock response
+    const trade = {
+      id: `ARB-${Date.now()}`,
+      userId: req.user.id,
+      coin,
+      amount,
+      buyExchange,
+      sellExchange,
+      buyPrice,
+      sellPrice,
+      profit: expectedProfit,
+      profitMargin,
+      status: 'pending',
+      message: 'Trade simulation - connect exchange API keys to execute real trades',
+      executedAt: new Date().toISOString()
+    };
+
+    res.json({
+      success: true,
+      message: 'Trade simulated successfully',
+      data: trade
+    });
+
   } catch (error) {
-    console.error(`Error checking transfer for ${coin} on ${exchange.name}:`, error.message);
-    return false;
+    console.error('❌ Execute trade error:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Failed to execute trade',
+      error: error.message
+    });
   }
-}
+};
 
 export default {
+  getTopCoins,
   getArbitrageOpportunities,
-  executeArbitrageTrade,
+  refreshArbitrageOpportunities,
   getExchangeStatus,
   getArbitrageHistory,
-  getArbitrageStats
+  getArbitrageStats,
+  executeArbitrageTrade
 };

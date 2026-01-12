@@ -5,6 +5,8 @@ import vaultRoutes from './vaults.js';
 import notificationRoutes from './notifications.js';
 import adminRoutes from './admin.js';
 import userRoutes from './user.js'
+import arbitrageRoutes from './arbitrage.js';
+
 
 const router = express.Router();
 
@@ -25,6 +27,7 @@ router.use('/vaults', vaultRoutes);
 router.use('/notifications', notificationRoutes);
 router.use('/admin', adminRoutes);
 router.use('/user', userRoutes)
+router.use('/arbitrage', arbitrageRoutes);
 
 // 404 handler for API routes
 router.use('*', (req, res) => {
