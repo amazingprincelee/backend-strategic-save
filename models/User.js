@@ -21,28 +21,17 @@ const userSchema = new mongoose.Schema({
   walletAddress: {
     type: String,
     required: false,
-    sparse: true, // Allows multiple null values while maintaining uniqueness for non-null values
-    unique: true,
     lowercase: true,
     trim: true,
     match: [/^0x[a-fA-F0-9]{40}$/, 'Please enter a valid Ethereum address']
   },
-  profile: {
-    firstName: {
+
+  fullName: {
       type: String,
       trim: true,
-      maxlength: [50, 'First name cannot exceed 50 characters']
+      maxlength: [50, 'Full name cannot exceed 50 characters']
     },
-    lastName: {
-      type: String,
-      trim: true,
-      maxlength: [50, 'Last name cannot exceed 50 characters']
-    },
-    avatar: {
-      type: String,
-      default: null
-    }
-  },
+   
   preferences: {
     emailNotifications: {
       vaultMatured: { type: Boolean, default: true },
@@ -103,13 +92,7 @@ const userSchema = new mongoose.Schema({
   toObject: { virtuals: true }
 });
 
-// Virtual for full name
-userSchema.virtual('fullName').get(function() {
-  if (this.profile.firstName && this.profile.lastName) {
-    return `${this.profile.firstName} ${this.profile.lastName}`;
-  }
-  return this.profile.firstName || this.profile.lastName || 'User';
-});
+
 
 // Virtual populate for user's vaults
 userSchema.virtual('vaults', {

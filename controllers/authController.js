@@ -9,17 +9,9 @@ import {
 
 // Register new user
 export const register = async (req, res) => {
- console.log("I got hit o");
  
-
   try {
-    // Validate request data
-    const validatedData = await userRegistrationSchema.validate(req.body, {
-      abortEarly: false,
-      stripUnknown: true
-    });
-
-    const { email, password, fullName, walletAddress } = validatedData;
+    const { email, password, fullName} = req.body;
 
     // Check if user already exists by email
     const existingUserByEmail = await User.findOne({ email: email.toLowerCase() });
@@ -30,43 +22,22 @@ export const register = async (req, res) => {
       });
     }
 
-    // Check if wallet address is provided and already exists
-    if (walletAddress) {
-      const existingUserByWallet = await User.findOne({ 
-        walletAddress: walletAddress.toLowerCase() 
-      });
-      if (existingUserByWallet) {
-        return res.status(400).json({
-          success: false,
-          message: 'An account with this wallet address already exists'
-        });
-      }
-    }
 
     // Hash password
     const saltRounds = 12;
     const hashedPassword = await bcrypt.hash(password, saltRounds);
 
-    // Parse fullName into firstName and lastName
-    const nameParts = fullName ? fullName.trim().split(' ') : ['', ''];
-    const firstName = nameParts[0] || '';
-    const lastName = nameParts.slice(1).join(' ') || '';
 
     // Create new user
     const userObj = {
       email: email.toLowerCase(),
       password: hashedPassword,
       profile: {
-        firstName,
-        lastName
+        fullName,
       },
       role: 'user'
     };
 
-    // Only add walletAddress if provided
-    if (walletAddress) {
-      userObj.walletAddress = walletAddress.toLowerCase();
-    }
 
     const user = new User(userObj);
 
@@ -80,7 +51,6 @@ export const register = async (req, res) => {
     const userResponse = {
       id: user._id,
       email: user.email,
-      walletAddress: user.walletAddress,
       profile: user.profile,
       role: user.role,
       createdAt: user.createdAt
@@ -100,27 +70,6 @@ export const register = async (req, res) => {
 
   } catch (error) {
     console.error('Registration error:', error);
-    
-    if (error.name === 'ValidationError') {
-      const errors = Object.values(error.errors).map(err => ({
-        field: err.path,
-        message: err.message
-      }));
-      return res.status(400).json({
-        success: false,
-        message: 'Validation failed',
-        errors
-      });
-    }
-
-    if (error.code === 11000) {
-      const field = Object.keys(error.keyPattern)[0];
-      return res.status(400).json({
-        success: false,
-        message: `An account with this ${field} already exists`
-      });
-    }
-
     res.status(500).json({
       success: false,
       message: 'Registration failed. Please try again.'

@@ -51,7 +51,6 @@ const strictAuthLimiter = rateLimit({
  */
 router.post('/register', 
   authLimiter,
-  validateRequest(userRegistrationSchema),
   register
 );
 
