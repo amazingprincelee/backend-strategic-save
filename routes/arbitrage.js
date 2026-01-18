@@ -1,9 +1,23 @@
-import express from 'express'
-import { fetchExchanges } from '../controllers/arbitragecontroller.js'
+import express from 'express';
+import { 
+  fetchExchanges, 
+  getArbitrageOpportunities,
+  refreshArbitrageOpportunities,
+  getArbitrageStatus
+} from '../controllers/arbitragecontroller.js';
 
+const router = express.Router();
 
-const router = express.Router()
+// Get all available exchanges
+router.get('/fetch-exchanges', fetchExchanges);
 
-router.get('/fetch-exchanges', fetchExchanges )
+// Get cached arbitrage opportunities (recommended endpoint)
+router.get('/fetch-opportunity', getArbitrageOpportunities);
 
-export default router
+// Get service status
+router.get('/status', getArbitrageStatus);
+
+// Manual refresh (use sparingly - optional endpoint)
+router.post('/refresh', refreshArbitrageOpportunities);
+
+export default router;
