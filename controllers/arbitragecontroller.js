@@ -1,9 +1,11 @@
 import ccxt from "ccxt";
-import { 
-  getCachedOpportunities, 
+import {
+  getCachedOpportunities,
   refreshOpportunities,
-  isCacheReady 
+  isCacheReady,
+  getServiceStats
 } from "../services/Arbitrage/fetchPrices.js";
+import { exchangeManager } from "../config/Arbitrage/ccxtExchanges.js";
 
 // Get all exchanges that is listed on ccxt
 export const fetchExchanges = async (req, res) => {
@@ -113,7 +115,8 @@ export const refreshArbitrageOpportunities = async (req, res) => {
 export const getArbitrageStatus = async (req, res) => {
   try {
     const cacheData = getCachedOpportunities();
-    
+    const serviceStats = getServiceStats();
+
     res.json({
       success: true,
       status: {
@@ -122,15 +125,82 @@ export const getArbitrageStatus = async (req, res) => {
         opportunitiesCount: cacheData.opportunities.length,
         lastUpdate: cacheData.lastUpdate,
         nextUpdate: cacheData.nextUpdate,
-        dataAge: cacheData.lastUpdate 
-          ? Math.floor((Date.now() - cacheData.lastUpdate.getTime()) / 1000) 
+        dataAge: cacheData.lastUpdate
+          ? Math.floor((Date.now() - cacheData.lastUpdate.getTime()) / 1000)
           : null,
         error: cacheData.error
-      }
+      },
+      performance: cacheData.stats,
+      rateLimiting: serviceStats.rateLimitStatus,
+      fetchStats: serviceStats.fetchStats
     });
-    
+
   } catch (error) {
     console.error('❌ Error fetching status:', error);
+    res.status(500).json({
+      success: false,
+      error: error.message
+    });
+  }
+};
+
+// Update enabled exchanges for scanning
+export const updateEnabledExchanges = async (req, res) => {
+  try {
+    const { exchanges } = req.body;
+
+    if (!Array.isArray(exchanges) || exchanges.length === 0) {
+      return res.status(400).json({
+        success: false,
+        error: 'exchanges must be a non-empty array'
+      });
+    }
+
+    // Validate all exchange IDs
+    const invalidExchanges = exchanges.filter(id => !ccxt.exchanges.includes(id.toLowerCase()));
+    if (invalidExchanges.length > 0) {
+      return res.status(400).json({
+        success: false,
+        error: `Invalid exchange IDs: ${invalidExchanges.join(', ')}`
+      });
+    }
+
+    console.log(`🔄 Updating enabled exchanges to: ${exchanges.join(', ')}`);
+
+    // Update the exchange manager
+    exchangeManager.setEnabledExchanges(exchanges);
+
+    // Trigger a refresh to use new exchanges
+    refreshOpportunities().catch(err => {
+      console.error('Error refreshing after exchange update:', err);
+    });
+
+    res.json({
+      success: true,
+      message: 'Exchanges updated successfully. Refresh started.',
+      enabledExchanges: exchangeManager.getEnabledIds()
+    });
+
+  } catch (error) {
+    console.error('❌ Error updating exchanges:', error);
+    res.status(500).json({
+      success: false,
+      error: error.message
+    });
+  }
+};
+
+// Get currently enabled exchanges
+export const getEnabledExchanges = async (req, res) => {
+  try {
+    res.json({
+      success: true,
+      enabledExchanges: exchangeManager.getEnabledIds(),
+      availableExchanges: ccxt.exchanges.length,
+      note: 'Use PUT /api/arbitrage/exchanges to update the list'
+    });
+  } catch (error) {
+    console.error('❌ Error getting enabled exchanges:', error);
     res.status(500).json({
       success: false,
       error: error.message
@@ -141,7 +211,7 @@ export const getArbitrageStatus = async (req, res) => {
 // Helper function to format time
 function formatTimeSince(date) {
   const seconds = Math.floor((Date.now() - date.getTime()) / 1000);
-  
+
   if (seconds < 60) return `${seconds} seconds ago`;
   if (seconds < 3600) return `${Math.floor(seconds / 60)} minutes ago`;
   if (seconds < 86400) return `${Math.floor(seconds / 3600)} hours ago`;

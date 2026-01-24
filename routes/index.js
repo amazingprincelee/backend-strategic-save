@@ -4,9 +4,10 @@ import dashboardRoutes from './dashboard.js';
 import vaultRoutes from './vaults.js';
 import notificationRoutes from './notifications.js';
 import adminRoutes from './admin.js';
-import userRoutes from './user.js'
+import userRoutes from './user.js';
 import arbitrageRoutes from './arbitrage.js';
-
+import exchangeRoutes from './exchange.js';
+import settingsRoutes from './settings.js';
 
 const router = express.Router();
 
@@ -28,6 +29,8 @@ router.use('/notifications', notificationRoutes);
 router.use('/admin', adminRoutes);
 router.use('/user', userRoutes)
 router.use('/arbitrage', arbitrageRoutes);
+router.use('/exchanges', exchangeRoutes);
+router.use('/settings', settingsRoutes);
 
 // 404 handler for API routes
 router.use('*', (req, res) => {

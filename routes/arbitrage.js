@@ -1,14 +1,16 @@
 import express from 'express';
-import { 
-  fetchExchanges, 
+import {
+  fetchExchanges,
   getArbitrageOpportunities,
   refreshArbitrageOpportunities,
-  getArbitrageStatus
+  getArbitrageStatus,
+  updateEnabledExchanges,
+  getEnabledExchanges
 } from '../controllers/arbitragecontroller.js';
 
 const router = express.Router();
 
-// Get all available exchanges
+// Get all available exchanges from CCXT
 router.get('/fetch-exchanges', fetchExchanges);
 
 // Get cached arbitrage opportunities (recommended endpoint)
@@ -16,6 +18,12 @@ router.get('/fetch-opportunity', getArbitrageOpportunities);
 
 // Get service status
 router.get('/status', getArbitrageStatus);
+
+// Get currently enabled exchanges for scanning
+router.get('/exchanges', getEnabledExchanges);
+
+// Update enabled exchanges for scanning
+router.put('/exchanges', updateEnabledExchanges);
 
 // Manual refresh (use sparingly - optional endpoint)
 router.post('/refresh', refreshArbitrageOpportunities);

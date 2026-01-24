@@ -145,16 +145,28 @@ export function findArbitrageOpportunities(allPricesData, config = {}) {
         highestBid.data?.volume || 0
       ),
       
-      // Transfer status
-      transferStatus: 
-        lowestAsk.data?.isFullyTransferable && highestBid.data?.isFullyTransferable 
-          ? 'Verified' 
+      // Transfer status - detailed information
+      transferStatus:
+        lowestAsk.data?.isFullyTransferable === true && highestBid.data?.isFullyTransferable === true
+          ? 'Verified'
           : lowestAsk.data?.isFullyTransferable === false || highestBid.data?.isFullyTransferable === false
             ? 'Blocked'
             : 'Unknown',
-      
+
       buyTransferable: lowestAsk.data?.isFullyTransferable ?? null,
       sellTransferable: highestBid.data?.isFullyTransferable ?? null,
+
+      // Detailed transfer info for each exchange
+      buyTransferDetails: {
+        canDeposit: lowestAsk.data?.canDepositBase ?? null,
+        canWithdraw: lowestAsk.data?.canWithdrawBase ?? null,
+        statusSource: lowestAsk.data?.statusSource ?? 'unknown'
+      },
+      sellTransferDetails: {
+        canDeposit: highestBid.data?.canDepositBase ?? null,
+        canWithdraw: highestBid.data?.canWithdrawBase ?? null,
+        statusSource: highestBid.data?.statusSource ?? 'unknown'
+      },
       
       // Risk assessment
       riskLevel: getRiskLevel(profitPercent, netProfitPercent, tradeableVolume, lowestAsk.data, highestBid.data),
@@ -172,9 +184,13 @@ export function findArbitrageOpportunities(allPricesData, config = {}) {
       spreadDollar: profitPerCoin,
       timestamp: new Date().toISOString(),
       
-      // Additional details for reference
-      buyOrderBook: lowestAsk.data?.asks?.slice(0, 3) || [],
-      sellOrderBook: highestBid.data?.bids?.slice(0, 3) || []
+      // Additional details for reference - order book depth
+      buyOrderBook: lowestAsk.data?.asks?.slice(0, 5) || [],
+      sellOrderBook: highestBid.data?.bids?.slice(0, 5) || [],
+
+      // Raw volume data from each exchange
+      buyExchangeVolume: lowestAsk.data?.volume || 0,
+      sellExchangeVolume: highestBid.data?.volume || 0
     });
   }
   
