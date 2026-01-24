@@ -6,7 +6,15 @@ import ccxt from "ccxt";
 class ExchangeManager {
   constructor() {
     this.exchanges = {};
-    this.enabledExchangeIds = ['gateio', 'bigone']; // Default exchanges (removed lbank for now due to rate limits)
+    // Default exchanges - popular ones with good pair coverage and API reliability
+    // These exchanges typically have most TOP_100_PAIRS available
+    this.enabledExchangeIds = [
+      'binance',    // Largest exchange, best liquidity
+      'kucoin',     // Large exchange with many altcoins
+      'gateio',     // Good altcoin coverage
+      'bybit',      // Large derivatives + spot
+      'okx',        // Major exchange
+    ];
     this.initialized = false;
   }
 

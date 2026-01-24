@@ -301,11 +301,18 @@ const fetchAllPriceData = async () => {
   // Get current exchanges
   const currentExchanges = Object.keys(getExchanges());
 
-  console.log(`\n🔄 Starting PARALLEL fetch of ${TOP_100_PAIRS.length} pairs...`);
+  console.log(`\n${'='.repeat(60)}`);
+  console.log(`🔄 Starting PARALLEL fetch of ${TOP_100_PAIRS.length} pairs...`);
   console.log(`⏰ Started at: ${new Date().toLocaleString()}`);
   console.log(`📊 Concurrency: ${CONCURRENCY_LIMIT} pairs per batch`);
-  console.log(`🏦 Exchanges: ${currentExchanges.join(', ')} (${currentExchanges.length} total)`);
-  console.log(`🛡️  Rate limiting: ENABLED (per-exchange limits)\n`);
+  console.log(`🏦 Active Exchanges (${currentExchanges.length}): ${currentExchanges.join(', ')}`);
+  console.log(`🛡️  Rate limiting: ENABLED (per-exchange limits)`);
+
+  if (currentExchanges.length < 2) {
+    console.log(`⚠️  WARNING: Less than 2 exchanges active! Arbitrage requires at least 2 exchanges.`);
+    console.log(`   Please select more exchanges in Settings to find opportunities.`);
+  }
+  console.log(`${'='.repeat(60)}\n`);
 
   try {
     // Process all pairs in parallel batches
