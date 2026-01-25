@@ -14,8 +14,8 @@ let fetchError = null;
 
 // Configuration
 const UPDATE_INTERVAL = 30 * 60 * 1000; // 30 minutes
-const CONCURRENCY_LIMIT = 5; // Process 5 pairs at a time (conservative with rate limiting)
-const BATCH_DELAY_MS = 50; // Minimal delay between batches
+const CONCURRENCY_LIMIT = 2; // Process 2 pairs at a time (very conservative to avoid rate limits)
+const BATCH_DELAY_MS = 2000; // 2 second delay between batches to let rate limits recover
 
 // Cache for currency data (doesn't change frequently)
 const currencyCache = new Map();

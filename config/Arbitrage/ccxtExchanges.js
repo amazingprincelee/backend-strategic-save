@@ -6,14 +6,13 @@ import ccxt from "ccxt";
 class ExchangeManager {
   constructor() {
     this.exchanges = {};
-    // Default exchanges - popular ones with good pair coverage and API reliability
-    // These exchanges typically have most TOP_100_PAIRS available
+    // Default exchanges - start with 3 reliable ones to minimize rate limiting
+    // These have good pair coverage and less aggressive rate limits
+    // Users can add more in Settings (up to 10)
     this.enabledExchangeIds = [
-      'binance',    // Largest exchange, best liquidity
+      'gateio',     // Good altcoin coverage, reliable API
       'kucoin',     // Large exchange with many altcoins
-      'gateio',     // Good altcoin coverage
-      'bybit',      // Large derivatives + spot
-      'okx',        // Major exchange
+      'mexc',       // Good pair coverage, generous rate limits
     ];
     this.initialized = false;
   }

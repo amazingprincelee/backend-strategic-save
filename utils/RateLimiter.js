@@ -293,81 +293,104 @@ class ExchangeRateLimiter {
 }
 
 // Pre-configured exchange rate limits based on known API limits
+// Using VERY CONSERVATIVE limits to avoid rate limiting
 const EXCHANGE_RATE_LIMITS = {
-  // Gate.io: 900 requests per minute = 15/sec, but be conservative
-  gateio: {
-    requestsPerSecond: 10,
-    burstLimit: 15,
+  // Binance: Official limit is 1200/min but they rate limit aggressively
+  // Use very conservative: 2 requests per second
+  binance: {
+    requestsPerSecond: 2,
+    burstLimit: 3,
+    baseBackoffMs: 5000,
+    maxBackoffMs: 60000,
   },
 
-  // LBank: Very strict rate limits - 10 requests per 10 seconds
-  lbank: {
-    requestsPerSecond: 0.5,  // 1 request every 2 seconds
-    burstLimit: 2,
-    maxRetries: 2,
-    baseBackoffMs: 10000,  // Start with 10 second backoff
+  // Bybit: Despite high official limits, they rate limit quickly
+  // Use very conservative: 2 requests per second
+  bybit: {
+    requestsPerSecond: 2,
+    burstLimit: 3,
+    baseBackoffMs: 5000,
+    maxBackoffMs: 60000,
+  },
+
+  // KuCoin: Official 30/sec but be conservative
+  kucoin: {
+    requestsPerSecond: 3,
+    burstLimit: 5,
+    baseBackoffMs: 3000,
+  },
+
+  // OKX: 20 requests per 2 seconds = 10/sec, be conservative
+  okx: {
+    requestsPerSecond: 2,
+    burstLimit: 4,
+    baseBackoffMs: 5000,
+  },
+
+  // Gate.io: 900 requests per minute, be conservative
+  gateio: {
+    requestsPerSecond: 3,
+    burstLimit: 5,
+    baseBackoffMs: 3000,
   },
 
   // BigONE: 300 requests per minute = 5/sec
   bigone: {
-    requestsPerSecond: 4,
-    burstLimit: 8,
+    requestsPerSecond: 2,
+    burstLimit: 4,
   },
 
-  // Binance: 1200 requests per minute = 20/sec (very generous)
-  binance: {
-    requestsPerSecond: 15,
-    burstLimit: 20,
+  // LBank: Very strict rate limits
+  lbank: {
+    requestsPerSecond: 0.5,
+    burstLimit: 2,
+    maxRetries: 2,
+    baseBackoffMs: 10000,
   },
 
-  // Huobi: 100 requests per 10 seconds = 10/sec
+  // Huobi: 100 requests per 10 seconds
   huobi: {
-    requestsPerSecond: 8,
-    burstLimit: 12,
+    requestsPerSecond: 2,
+    burstLimit: 4,
   },
 
   // Kraken: 15 requests per second (tier 2)
   kraken: {
-    requestsPerSecond: 10,
-    burstLimit: 15,
+    requestsPerSecond: 3,
+    burstLimit: 5,
   },
 
   // Coinbase: 10 requests per second
   coinbase: {
-    requestsPerSecond: 8,
-    burstLimit: 10,
-  },
-
-  // OKX: 20 requests per 2 seconds = 10/sec
-  okx: {
-    requestsPerSecond: 8,
-    burstLimit: 12,
-  },
-
-  // Bybit: 120 requests per second (very generous)
-  bybit: {
-    requestsPerSecond: 50,
-    burstLimit: 60,
-  },
-
-  // KuCoin: 30 requests per second
-  kucoin: {
-    requestsPerSecond: 20,
-    burstLimit: 30,
+    requestsPerSecond: 2,
+    burstLimit: 4,
   },
 
   // Poloniex: 6 requests per second
   poloniex: {
-    requestsPerSecond: 5,
-    burstLimit: 6,
+    requestsPerSecond: 2,
+    burstLimit: 3,
   },
 
-  // Default conservative limits for unknown exchanges
-  default: {
+  // MEXC: Conservative
+  mexc: {
     requestsPerSecond: 2,
-    burstLimit: 5,
+    burstLimit: 3,
+  },
+
+  // Bitget: Conservative
+  bitget: {
+    requestsPerSecond: 2,
+    burstLimit: 3,
+  },
+
+  // Default very conservative limits for unknown exchanges
+  default: {
+    requestsPerSecond: 1,
+    burstLimit: 2,
     maxRetries: 3,
-    baseBackoffMs: 2000,
+    baseBackoffMs: 5000,
+    maxBackoffMs: 60000,
   }
 };
 
