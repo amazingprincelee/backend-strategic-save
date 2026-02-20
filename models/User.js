@@ -34,15 +34,13 @@ const userSchema = new mongoose.Schema({
    
   preferences: {
     emailNotifications: {
-      vaultMatured: { type: Boolean, default: true },
-      depositConfirmed: { type: Boolean, default: true },
-      withdrawalCompleted: { type: Boolean, default: true },
+      botAlert: { type: Boolean, default: true },
+      tradeExecuted: { type: Boolean, default: true },
       platformUpdates: { type: Boolean, default: false }
     },
     inAppNotifications: {
-      vaultMatured: { type: Boolean, default: true },
-      depositConfirmed: { type: Boolean, default: true },
-      withdrawalCompleted: { type: Boolean, default: true },
+      botAlert: { type: Boolean, default: true },
+      tradeExecuted: { type: Boolean, default: true },
       platformUpdates: { type: Boolean, default: true }
     }
   },
@@ -59,46 +57,8 @@ const userSchema = new mongoose.Schema({
     enum: ['user', 'admin'],
     default: 'user'
   },
-  investments: [{
-    vaultId: {
-      type: mongoose.Schema.Types.ObjectId,
-      ref: 'Vault'
-    },
-    amount: {
-      type: Number,
-      required: true,
-      min: 0
-    },
-    status: {
-      type: String,
-      enum: ['pending', 'active', 'completed', 'cancelled'],
-      default: 'pending'
-    },
-    createdAt: {
-      type: Date,
-      default: Date.now
-    },
-    maturityDate: {
-      type: Date
-    },
-    returns: {
-      type: Number,
-      default: 0
-    }
-  }]
 }, {
-  timestamps: true,
-  toJSON: { virtuals: true },
-  toObject: { virtuals: true }
-});
-
-
-
-// Virtual populate for user's vaults
-userSchema.virtual('vaults', {
-  ref: 'Vault',
-  localField: 'walletAddress',
-  foreignField: 'userAddress'
+  timestamps: true
 });
 
 // Index for better query performance

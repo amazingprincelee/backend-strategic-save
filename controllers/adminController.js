@@ -1,11 +1,9 @@
-import { User, Vault, Notification } from '../models/index.js';
-import blockchainService from '../utils/blockchainService.js';
+import { User, Notification } from '../models/index.js';
 import emailService from '../utils/emailService.js';
 import {
   adminUserUpdateSchema,
   paginationSchema
 } from '../utils/validation.js';
-import { ethers } from 'ethers';
 
 // Get platform statistics
 export const getPlatformStats = async (req, res) => {
@@ -37,58 +35,6 @@ export const getPlatformStats = async (req, res) => {
       }
     ]);
 
-    // Get vault statistics
-    const vaultStats = await Vault.aggregate([
-      {
-        $group: {
-          _id: null,
-          totalVaults: { $sum: 1 },
-          activeVaults: {
-            $sum: { $cond: [{ $eq: ['$status', 'active'] }, 1, 0] }
-          },
-          unlockedVaults: {
-            $sum: { 
-              $cond: [
-                { $lte: ['$unlockTime', new Date()] }, 
-                1, 
-                0
-              ] 
-            }
-          },
-          totalValueLocked: {
-            $sum: { $toDouble: '$balance' }
-          },
-          totalDeposited: {
-            $sum: {
-              $reduce: {
-                input: '$deposits',
-                initialValue: 0,
-                in: { $add: ['$$value', { $toDouble: '$$this.amount' }] }
-              }
-            }
-          },
-          totalWithdrawn: {
-            $sum: {
-              $reduce: {
-                input: '$withdrawals',
-                initialValue: 0,
-                in: { $add: ['$$value', { $toDouble: '$$this.amount' }] }
-              }
-            }
-          },
-          totalPlatformFees: {
-            $sum: {
-              $reduce: {
-                input: '$withdrawals',
-                initialValue: 0,
-                in: { $add: ['$$value', { $toDouble: '$$this.platformFee' }] }
-              }
-            }
-          }
-        }
-      }
-    ]);
-
     // Get notification statistics
     const notificationStats = await Notification.aggregate([
       {
@@ -105,38 +51,12 @@ export const getPlatformStats = async (req, res) => {
       }
     ]);
 
-    // Get token distribution
-    const tokenDistribution = await Vault.aggregate([
-      {
-        $group: {
-          _id: '$tokenSymbol',
-          vaultCount: { $sum: 1 },
-          totalBalance: { $sum: { $toDouble: '$balance' } }
-        }
-      },
-      { $sort: { totalBalance: -1 } }
-    ]);
-
     // Get recent activity
     const recentUsers = await User.find()
       .sort({ createdAt: -1 })
       .limit(5)
-      .select('email walletAddress isEmailVerified createdAt')
+      .select('email walletAddress createdAt')
       .lean();
-
-    const recentVaults = await Vault.find()
-      .sort({ createdAt: -1 })
-      .limit(5)
-      .select('vaultId userAddress tokenSymbol balance unlockTime status')
-      .lean();
-
-    // Get blockchain contract info
-    let contractInfo = null;
-    try {
-      contractInfo = await blockchainService.getContractInfo();
-    } catch (error) {
-      console.error('Failed to fetch contract info:', error);
-    }
 
     const platformStats = {
       users: userStats[0] || {
@@ -145,26 +65,14 @@ export const getPlatformStats = async (req, res) => {
         adminUsers: 0,
         usersWithWallets: 0
       },
-      vaults: vaultStats[0] || {
-        totalVaults: 0,
-        activeVaults: 0,
-        unlockedVaults: 0,
-        totalValueLocked: 0,
-        totalDeposited: 0,
-        totalWithdrawn: 0,
-        totalPlatformFees: 0
-      },
       notifications: notificationStats[0] || {
         totalNotifications: 0,
         unreadNotifications: 0,
         highPriorityNotifications: 0
       },
-      tokenDistribution,
       recentActivity: {
         users: recentUsers,
-        vaults: recentVaults
       },
-      contract: contractInfo
     };
 
     res.json({
@@ -372,20 +280,6 @@ export const deleteUser = async (req, res) => {
       });
     }
 
-    // Check if user has active vaults
-    const activeVaults = await Vault.countDocuments({
-      userAddress: user.walletAddress?.toLowerCase(),
-      status: 'active',
-      balance: { $gt: '0' }
-    });
-
-    if (activeVaults > 0) {
-      return res.status(400).json({
-        success: false,
-        message: `Cannot delete user with ${activeVaults} active vaults containing funds`
-      });
-    }
-
     // Delete user's notifications
     await Notification.deleteMany({
       $or: [
@@ -530,34 +424,6 @@ export const sendBroadcastEmail = async (req, res) => {
   }
 };
 
-// Sync all vaults with blockchain (admin only)
-export const syncAllVaults = async (req, res) => {
-  try {
-    // Check if user is admin
-    if (req.user.role !== 'admin') {
-      return res.status(403).json({
-        success: false,
-        message: 'Access denied'
-      });
-    }
-
-    // Trigger historical sync
-    await blockchainService.syncHistoricalEvents();
-
-    res.json({
-      success: true,
-      message: 'Vault synchronization initiated'
-    });
-
-  } catch (error) {
-    console.error('Sync all vaults error:', error);
-    res.status(500).json({
-      success: false,
-      message: 'Failed to sync vaults'
-    });
-  }
-};
-
 // Get system health (admin only)
 export const getSystemHealth = async (req, res) => {
   try {
@@ -581,20 +447,6 @@ export const getSystemHealth = async (req, res) => {
       health.services.database = { status: 'healthy', message: 'Connected' };
     } catch (dbError) {
       health.services.database = { status: 'unhealthy', message: dbError.message };
-      health.status = 'unhealthy';
-    }
-
-    // Check blockchain connection
-    try {
-      const contractInfo = await blockchainService.getContractInfo();
-      health.services.blockchain = { 
-        status: 'healthy', 
-        message: 'Connected',
-        contractAddress: contractInfo.address,
-        network: contractInfo.network
-      };
-    } catch (blockchainError) {
-      health.services.blockchain = { status: 'unhealthy', message: blockchainError.message };
       health.status = 'unhealthy';
     }
 

@@ -1,10 +1,11 @@
 import ccxt from "ccxt";
+// Use new Order Book-based Arbitrage Service
 import {
   getCachedOpportunities,
   refreshOpportunities,
-  isCacheReady,
+  isServiceReady,
   getServiceStats
-} from "../services/Arbitrage/fetchPrices.js";
+} from "../services/Arbitrage/ArbitrageService.js";
 import { exchangeManager } from "../config/Arbitrage/ccxtExchanges.js";
 
 // Get all exchanges that is listed on ccxt
@@ -27,7 +28,7 @@ export const getArbitrageOpportunities = async (req, res) => {
     const cacheData = getCachedOpportunities();
     
     // Check if cache is ready
-    if (!isCacheReady() && !cacheData.isLoading) {
+    if (!isServiceReady() && !cacheData.isLoading) {
       return res.status(503).json({
         success: false,
         message: 'Arbitrage service is initializing. Please try again in a few moments.',
@@ -120,7 +121,7 @@ export const getArbitrageStatus = async (req, res) => {
     res.json({
       success: true,
       status: {
-        isReady: isCacheReady(),
+        isReady: isServiceReady(),
         isLoading: cacheData.isLoading,
         opportunitiesCount: cacheData.opportunities.length,
         lastUpdate: cacheData.lastUpdate,

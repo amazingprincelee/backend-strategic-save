@@ -10,9 +10,16 @@ class ExchangeManager {
     // These have good pair coverage and less aggressive rate limits
     // Users can add more in Settings (up to 10)
     this.enabledExchangeIds = [
-      'gateio',     // Good altcoin coverage, reliable API
-      'kucoin',     // Large exchange with many altcoins
-      'mexc',       // Good pair coverage, generous rate limits
+      "binance", // Best liquidity, fastest order books
+      "okx", // Very strong API + deep liquidity
+      "bybit", // Great USDT pairs, fast
+      "kucoin", // Excellent altcoin coverage
+      "gateio", // Many mid-cap & small-cap pairs
+      "mexc", // Very generous rate limits
+      "bitget", // Solid and improving liquidity
+      "coinex", // Stable API, decent altcoins
+      "htx", // Former Huobi, still strong liquidity
+      "poloniex", // Older but reliable for spot
     ];
     this.initialized = false;
   }
@@ -34,15 +41,17 @@ class ExchangeManager {
 
         // Check if exchange exists in CCXT
         if (!ccxt.exchanges.includes(exchangeId)) {
-          console.warn(`⚠️  Exchange "${exchangeId}" not found in CCXT, skipping`);
+          console.warn(
+            `⚠️  Exchange "${exchangeId}" not found in CCXT, skipping`,
+          );
           continue;
         }
 
         // Create exchange instance
         const ExchangeClass = ccxt[exchangeId];
         this.exchanges[exchangeId] = new ExchangeClass({
-          enableRateLimit: true,  // Enable built-in rate limiting
-          timeout: 30000,         // 30 second timeout
+          enableRateLimit: true, // Enable built-in rate limiting
+          timeout: 30000, // 30 second timeout
         });
 
         console.log(`   ✓ ${exchangeId} initialized`);
@@ -71,7 +80,7 @@ class ExchangeManager {
    * Update enabled exchanges and reinitialize
    */
   setEnabledExchanges(exchangeIds) {
-    this.enabledExchangeIds = exchangeIds.map(id => id.toLowerCase());
+    this.enabledExchangeIds = exchangeIds.map((id) => id.toLowerCase());
     return this.initialize(this.enabledExchangeIds);
   }
 

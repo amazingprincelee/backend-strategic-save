@@ -21,9 +21,12 @@ import { errorHandler, notFound } from './middleware/errorHandler.js';
 import apiRoutes from './routes/index.js';
 
 // Import services
-import blockchainService from './utils/blockchainService.js';
 import emailService from './utils/emailService.js';
-import { initializeBackgroundFetch } from './services/Arbitrage/fetchPrices.js';
+// New Order Book-based Arbitrage Service
+import { initializeBackgroundScan } from './services/Arbitrage/ArbitrageService.js';
+// Bot Trading Engine
+import botEngine from './services/bot/BotEngine.js';
+import BotConfig from './models/bot/BotConfig.js';
 
 // Load environment variables
 dotenv.config();
@@ -141,13 +144,35 @@ const startServer = async () => {
     // Email service is already initialized on import
     console.log('✅ Email service initialized');
 
-    // Blockchain service is already initialized on import
-    console.log('✅ Blockchain service initialized');
+    // Initialize Order Book-based Arbitrage Service
+    console.log('🔄 Initializing Order Book Arbitrage Service...');
+    initializeBackgroundScan({
+      minProfitPercent: 0.1,      // Minimum 0.1% net profit
+      maxSlippagePercent: 0.5,   // Maximum 0.5% slippage
+      minLiquidityScore: 40,     // Minimum liquidity score
+      orderBookDepth: 20,        // Analyze top 20 orders
+      tradeSizesToTest: [100, 500, 1000, 2500, 5000] // USD amounts to test
+    });
+    console.log('✅ Order Book Arbitrage Service initialized');
 
-    // Initialize arbitrage background fetch service
-    console.log('🔄 Initializing arbitrage service...');
-    initializeBackgroundFetch();
-    console.log('✅ Arbitrage service initialized');
+    // Initialize Bot Trading Engine
+    console.log('🤖 Initializing Bot Trading Engine...');
+    botEngine.setIO(io);
+    // Resume any bots that were running when the server last shut down
+    try {
+      const runningBots = await BotConfig.find({ status: 'running' });
+      for (const bot of runningBots) {
+        try {
+          await botEngine.startBot(bot._id);
+          console.log(`   ✅ Resumed bot: ${bot.name}`);
+        } catch (botErr) {
+          console.warn(`   ⚠️  Could not resume bot ${bot.name}: ${botErr.message}`);
+        }
+      }
+      console.log(`✅ Bot Trading Engine initialized (${runningBots.length} bots resumed)`);
+    } catch (botEngineError) {
+      console.warn('⚠️  Bot engine initialization warning:', botEngineError.message);
+    }
 
     // Start server
     const PORT = process.env.PORT || 5000;
@@ -160,6 +185,9 @@ const startServer = async () => {
       console.log(`🔌 Socket.IO Path: /socket.io/`);
       console.log(`📊 Arbitrage Status: http://localhost:${PORT}/api/arbitrage/status`);
       console.log(`💰 Arbitrage Opportunities: http://localhost:${PORT}/api/arbitrage/fetch-opportunity`);
+      console.log(`🤖 Bot API: http://localhost:${PORT}/api/bots`);
+      console.log(`🎮 Demo API: http://localhost:${PORT}/api/demo`);
+      console.log(`📋 Strategies: http://localhost:${PORT}/api/strategies`);
       console.log(`${'='.repeat(50)}\n`);
     });
 

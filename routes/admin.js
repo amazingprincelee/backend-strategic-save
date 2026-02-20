@@ -7,7 +7,6 @@ import {
   deleteUser,
   sendBroadcastNotification,
   sendBroadcastEmail,
-  syncAllVaults,
   getSystemHealth,
   getAuditLogs
 } from '../controllers/adminController.js';
@@ -213,16 +212,6 @@ router.post('/broadcast/email',
     }
   }),
   sendBroadcastEmail
-);
-
-/**
- * @route   POST /api/admin/sync-vaults
- * @desc    Sync all vaults with blockchain
- * @access  Private (Admin only)
- */
-router.post('/sync-vaults', 
-  adminActionLimiter,
-  syncAllVaults
 );
 
 /**
