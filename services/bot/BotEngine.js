@@ -5,6 +5,7 @@ import riskEngine from './RiskEngine.js';
 import demoSimulator from './DemoSimulator.js';
 import exchangeConnector from './ExchangeConnector.js';
 import ExchangeAccount from '../../models/ExchangeAccount.js';
+import { calculateRSI, calcVolumeMA, detectTrend } from './IndicatorEngine.js';
 
 // Strategy map
 import adaptiveGrid from '../strategies/AdaptiveGridStrategy.js';
@@ -125,17 +126,31 @@ class BotEngine {
 
       // Fetch OHLCV candles
       const timeframe = TIMEFRAME_MAP[bot.strategyId] || '1h';
+      const intervalMs = TICK_INTERVAL_MS[timeframe] || 3_600_000;
       const candles = await this._fetchCandles(bot, timeframe);
       if (!candles || candles.length < 30) {
         console.warn(`[BotEngine] Insufficient candle data for bot ${botId}`);
         return;
       }
 
+      // Compute display indicators from candles
+      const closes  = candles.map(c => c.close);
+      const volumes = candles.map(c => c.volume);
+      const lastIdx = candles.length - 1;
+      const currentPrice = closes[lastIdx];
+
+      const rsiValues  = calculateRSI(closes, 14);
+      const currentRSI = rsiValues[lastIdx] != null ? parseFloat(rsiValues[lastIdx].toFixed(2)) : null;
+
+      const avgVolume    = calcVolumeMA(volumes, 20);
+      const volumeRatio  = avgVolume > 0 ? parseFloat((volumes[lastIdx] / avgVolume).toFixed(2)) : null;
+
+      const trend = detectTrend(candles, 50, 200);
+
       // Load open positions
       const openPositions = await Position.find({ botId: bot._id, status: 'open' });
 
       // Update unrealized P&L and trailing stops for all open positions
-      const currentPrice = candles[candles.length - 1].close;
       for (const position of openPositions) {
         position.currentPrice = currentPrice;
         position.unrealizedPnL = (currentPrice - position.entryPrice) * position.amount - position.entryFee;
@@ -165,6 +180,30 @@ class BotEngine {
       }
 
       const signals = await strategy.analyze(bot, candles, openPositions);
+
+      // Determine tick action label for the log
+      const hasBuy  = signals.some(s => s.action === 'buy');
+      const hasSell = signals.some(s => s.action === 'sell');
+      const tickAction = hasBuy ? 'entry' : hasSell ? 'exit' : 'waiting';
+
+      // Build and persist lastAnalysis + tickLog
+      const now       = new Date();
+      const nextTickAt = new Date(Date.now() + intervalMs);
+      const tickEntry  = { timestamp: now, currentPrice, rsi: currentRSI, volumeRatio, action: tickAction };
+
+      await BotConfig.findByIdAndUpdate(botId, {
+        lastAnalysis: {
+          timestamp: now,
+          nextTickAt,
+          currentPrice,
+          rsi: currentRSI,
+          volumeRatio,
+          trend,
+          action: tickAction
+        },
+        // Push new entry, keep only last 10
+        $push: { tickLog: { $each: [tickEntry], $slice: -10 } }
+      });
 
       // Execute signals
       for (const signal of signals) {
@@ -209,7 +248,7 @@ class BotEngine {
         console.warn(`[BotEngine] Bot ${botId} paused: ${pauseReason}`);
       }
 
-      // Emit real-time tick update
+      // Emit real-time tick update (includes analysis for BotDetail page)
       if (this.io) {
         const openCount = await Position.countDocuments({ botId: bot._id, status: 'open' });
         this.io.to(`user:${bot.userId.toString()}`).emit('bot:tick', {
@@ -217,7 +256,9 @@ class BotEngine {
           currentPrice,
           openPositions: openCount,
           status: bot.status,
-          unrealizedPnL: unrealizedTotal
+          unrealizedPnL: unrealizedTotal,
+          lastAnalysis: { timestamp: now, nextTickAt, currentPrice, rsi: currentRSI, volumeRatio, trend, action: tickAction },
+          tickEntry
         });
       }
 

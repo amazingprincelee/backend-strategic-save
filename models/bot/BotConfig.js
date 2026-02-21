@@ -100,7 +100,32 @@ const botConfigSchema = new mongoose.Schema({
     lastTradeAt: { type: Date, default: null }
   },
   startedAt: { type: Date, default: null },
-  stoppedAt: { type: Date, default: null }
+  stoppedAt: { type: Date, default: null },
+
+  // Last tick analysis — shown on the bot detail page
+  lastAnalysis: {
+    timestamp:   { type: Date,   default: null },
+    nextTickAt:  { type: Date,   default: null },
+    currentPrice:{ type: Number, default: null },
+    rsi:         { type: Number, default: null },
+    volumeRatio: { type: Number, default: null }, // current vol / 20-bar avg
+    trend:       { type: String, default: null }, // 'bullish' | 'bearish' | 'neutral'
+    action:      { type: String, default: null }, // 'entry' | 'exit' | 'waiting'
+    conditionsMet:    { type: Number, default: 0 },
+    totalConditions:  { type: Number, default: 0 }
+  },
+
+  // Capped log of last 10 tick summaries
+  tickLog: {
+    type: [{
+      timestamp:    { type: Date },
+      currentPrice: { type: Number },
+      rsi:          { type: Number },
+      volumeRatio:  { type: Number },
+      action:       { type: String }  // 'entry' | 'exit' | 'waiting'
+    }],
+    default: []
+  }
 }, {
   timestamps: true
 });
