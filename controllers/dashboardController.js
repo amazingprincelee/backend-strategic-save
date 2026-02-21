@@ -127,7 +127,7 @@ export const getNotifications = async (req, res) => {
       {
         id: '1',
         type: 'welcome',
-        title: 'Welcome to Strategic Crypto Save!',
+        title: 'Welcome to SmartStrategy!',
         message: 'Start your crypto investment journey today.',
         read: false,
         createdAt: user.createdAt

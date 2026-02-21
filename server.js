@@ -91,7 +91,7 @@ app.use('/api', apiRoutes);
 app.get('/', (req, res) => {
   res.json({
     success: true,
-    message: 'Strategic Crypto Trader API',
+    message: 'SmartStrategy API',
     version: '1.0.0',
     documentation: '/api/health',
     timestamp: new Date().toISOString()

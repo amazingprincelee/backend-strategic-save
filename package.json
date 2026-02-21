@@ -1,7 +1,7 @@
 {
-  "name": "strategic-crypto-save-backend",
+  "name": "smartstrategy-backend",
   "version": "1.0.0",
-  "description": "Backend API for Strategic Crypto Save - A MERN + Solidity savings dApp",
+  "description": "Backend API for SmartStrategy - A MERN stack crypto trading bot platform",
   "main": "server.js",
   "type": "module",
   "scripts": {
@@ -28,7 +28,7 @@
     "crypto",
     "dapp"
   ],
-  "author": "Strategic Crypto Save Team",
+  "author": "SmartStrategy Team",
   "license": "MIT",
   "engines": {
     "node": ">=18.0.0",

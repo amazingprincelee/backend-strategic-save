@@ -5,7 +5,8 @@ import {
   refreshArbitrageOpportunities,
   getArbitrageStatus,
   updateEnabledExchanges,
-  getEnabledExchanges
+  getEnabledExchanges,
+  getPastOpportunities,
 } from '../controllers/arbitragecontroller.js';
 
 const router = express.Router();
@@ -15,6 +16,10 @@ router.get('/fetch-exchanges', fetchExchanges);
 
 // Get cached arbitrage opportunities (recommended endpoint)
 router.get('/fetch-opportunity', getArbitrageOpportunities);
+
+// Get stored significant opportunities (≥2% net profit) — history + monitoring
+// ?status=all|active|cleared  &limit=100
+router.get('/past-opportunities', getPastOpportunities);
 
 // Get service status
 router.get('/status', getArbitrageStatus);

@@ -7,6 +7,7 @@ import {
   getServiceStats
 } from "../services/Arbitrage/ArbitrageService.js";
 import { exchangeManager } from "../config/Arbitrage/ccxtExchanges.js";
+import ArbitrageOpportunity from "../models/ArbitrageOpportunity.js";
 
 // Get all exchanges that is listed on ccxt
 export const fetchExchanges = async (req, res) => {
@@ -206,6 +207,33 @@ export const getEnabledExchanges = async (req, res) => {
       success: false,
       error: error.message
     });
+  }
+};
+
+// Get past/stored significant opportunities (≥2% net profit)
+export const getPastOpportunities = async (req, res) => {
+  try {
+    const { status = 'all', limit = 100 } = req.query;
+    const query = status !== 'all' ? { status } : {};
+
+    const opportunities = await ArbitrageOpportunity.find(query)
+      .sort({ firstDetectedAt: -1 })
+      .limit(Math.min(parseInt(limit) || 100, 200))
+      .lean();
+
+    // Summary counts
+    const activeCount  = await ArbitrageOpportunity.countDocuments({ status: 'active' });
+    const clearedCount = await ArbitrageOpportunity.countDocuments({ status: 'cleared' });
+
+    res.json({
+      success: true,
+      count: opportunities.length,
+      data: opportunities,
+      meta: { activeCount, clearedCount, total: activeCount + clearedCount },
+    });
+  } catch (err) {
+    console.error('❌ Error fetching past opportunities:', err);
+    res.status(500).json({ success: false, error: err.message });
   }
 };
 

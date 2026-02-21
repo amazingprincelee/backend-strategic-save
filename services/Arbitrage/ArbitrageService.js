@@ -16,6 +16,11 @@ import { exchangeManager } from '../../config/Arbitrage/ccxtExchanges.js';
 import { TOP_100_PAIRS } from '../../utils/top100Coins.js';
 import { scanForArbitrage, createConfig } from './ArbitrageEngine.js';
 import { clearOrderBookCache, getOrderBookCacheStats } from './OrderBookService.js';
+import ArbitrageOpportunity from '../../models/ArbitrageOpportunity.js';
+import User from '../../models/User.js';
+import emailService from '../../utils/emailService.js';
+
+const ALERT_THRESHOLD_PERCENT = 2; // minimum net profit % to store + email
 
 // Cache for storing opportunities
 let cachedOpportunities = [];
@@ -105,6 +110,124 @@ async function processBatches(symbols, config) {
 }
 
 /**
+ * After each scan:
+ *  1. Upsert opportunities with net profit ≥ ALERT_THRESHOLD_PERCENT
+ *  2. Mark previously-active opportunities as 'cleared' if they disappeared
+ *  3. Send one batch email to all users for brand-new opportunities
+ */
+async function processSignificantOpportunities(opportunities) {
+  try {
+    const significant = opportunities.filter(
+      o => (o.netProfitPercent || 0) >= ALERT_THRESHOLD_PERCENT
+    );
+
+    const now = new Date();
+
+    // IDs of significant opportunities found in this scan
+    const currentIds = significant.map(
+      o => `${o.symbol}-${o.buyExchange}-${o.sellExchange}`
+    );
+
+    // ── 1. Upsert each significant opportunity ────────────────────────────
+    const newOpportunities = []; // ones that didn't exist before
+
+    for (const opp of significant) {
+      const oppId = `${opp.symbol}-${opp.buyExchange}-${opp.sellExchange}`;
+
+      const existing = await ArbitrageOpportunity.findOne({ opportunityId: oppId });
+
+      if (!existing) {
+        // Brand new opportunity
+        const created = await ArbitrageOpportunity.create({
+          opportunityId:       oppId,
+          symbol:              opp.symbol,
+          buyExchange:         opp.buyExchange,
+          sellExchange:        opp.sellExchange,
+          netProfitPercent:    opp.netProfitPercent,
+          grossSpreadPercent:  opp.grossSpreadPercent,
+          expectedProfitUSD:   opp.expectedProfitUSD,
+          optimalTradeValueUSD: opp.optimalTradeValueUSD,
+          buyPrice:            opp.buyPrice,
+          sellPrice:           opp.sellPrice,
+          confidenceScore:     opp.confidenceScore,
+          riskLevel:           opp.riskLevel,
+          peakProfitPercent:   opp.netProfitPercent,
+          status:              'active',
+          firstDetectedAt:     now,
+          lastSeenAt:          now,
+          emailSent:           false,
+        });
+        newOpportunities.push(created);
+      } else if (existing.status === 'cleared') {
+        // Opportunity returned after being cleared → treat as new
+        await ArbitrageOpportunity.findByIdAndUpdate(existing._id, {
+          netProfitPercent:    opp.netProfitPercent,
+          grossSpreadPercent:  opp.grossSpreadPercent,
+          expectedProfitUSD:   opp.expectedProfitUSD,
+          optimalTradeValueUSD: opp.optimalTradeValueUSD,
+          buyPrice:            opp.buyPrice,
+          sellPrice:           opp.sellPrice,
+          confidenceScore:     opp.confidenceScore,
+          riskLevel:           opp.riskLevel,
+          peakProfitPercent:   Math.max(existing.peakProfitPercent || 0, opp.netProfitPercent),
+          status:              'active',
+          firstDetectedAt:     now,
+          lastSeenAt:          now,
+          clearedAt:           undefined,
+          emailSent:           false,
+        });
+        const updated = await ArbitrageOpportunity.findById(existing._id);
+        newOpportunities.push(updated);
+      } else {
+        // Still active — update snapshot and lastSeenAt
+        await ArbitrageOpportunity.findByIdAndUpdate(existing._id, {
+          netProfitPercent:    opp.netProfitPercent,
+          grossSpreadPercent:  opp.grossSpreadPercent,
+          expectedProfitUSD:   opp.expectedProfitUSD,
+          optimalTradeValueUSD: opp.optimalTradeValueUSD,
+          buyPrice:            opp.buyPrice,
+          sellPrice:           opp.sellPrice,
+          confidenceScore:     opp.confidenceScore,
+          riskLevel:           opp.riskLevel,
+          peakProfitPercent:   Math.max(existing.peakProfitPercent || 0, opp.netProfitPercent),
+          lastSeenAt:          now,
+        });
+      }
+    }
+
+    // ── 2. Mark active opportunities as cleared if not seen this scan ─────
+    await ArbitrageOpportunity.updateMany(
+      { status: 'active', opportunityId: { $nin: currentIds } },
+      { status: 'cleared', clearedAt: now }
+    );
+
+    // ── 3. Send email for new opportunities ───────────────────────────────
+    if (newOpportunities.length > 0) {
+      console.log(`[Arbitrage] ${newOpportunities.length} new ≥${ALERT_THRESHOLD_PERCENT}% opportunit${newOpportunities.length === 1 ? 'y' : 'ies'} — emailing users`);
+
+      const users = await User.find({ isActive: true, email: { $exists: true, $ne: '' } })
+        .select('email fullName')
+        .lean();
+
+      if (users.length > 0) {
+        await emailService.sendArbitrageAlert(users, newOpportunities);
+
+        // Mark emailed
+        const emailedIds = newOpportunities.map(o => o._id);
+        await ArbitrageOpportunity.updateMany({ _id: { $in: emailedIds } }, { emailSent: true });
+      }
+    }
+
+    if (significant.length > 0) {
+      console.log(`[Arbitrage] Stored/updated ${significant.length} significant opportunit${significant.length === 1 ? 'y' : 'ies'} (≥${ALERT_THRESHOLD_PERCENT}%)`);
+    }
+  } catch (err) {
+    // Non-fatal — don't let DB errors break the scan cycle
+    console.error('[Arbitrage] processSignificantOpportunities error:', err.message);
+  }
+}
+
+/**
  * Main scanning function - finds arbitrage opportunities
  */
 async function performScan(userPreferences = null) {
@@ -153,6 +276,9 @@ async function performScan(userPreferences = null) {
     // Update cache
     cachedOpportunities = opportunities;
     lastUpdateTime = new Date();
+
+    // Persist significant opportunities and send email alerts
+    processSignificantOpportunities(opportunities);
 
     // Update statistics
     const scanDuration = (Date.now() - startTime) / 1000;

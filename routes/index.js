@@ -11,6 +11,7 @@ import botRoutes from './bot.js';
 import exchangeAccountRoutes from './exchangeAccounts.js';
 import demoRoutes from './demo.js';
 import strategyRoutes from './strategies.js';
+import signalRoutes from './signals.js';
 
 const router = express.Router();
 
@@ -18,7 +19,7 @@ const router = express.Router();
 router.get('/health', (req, res) => {
   res.json({
     success: true,
-    message: 'Strategic Crypto Trader API is running',
+    message: 'SmartStrategy API is running',
     timestamp: new Date().toISOString(),
     version: '2.0.0'
   });
@@ -37,6 +38,7 @@ router.use('/bots', botRoutes);
 router.use('/exchange-accounts', exchangeAccountRoutes);
 router.use('/demo', demoRoutes);
 router.use('/strategies', strategyRoutes);
+router.use('/signals', signalRoutes);
 
 // 404 handler for API routes
 router.use('*', (req, res) => {
