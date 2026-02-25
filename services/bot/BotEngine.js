@@ -48,10 +48,14 @@ const TICK_INTERVAL_MS = {
  * BotEngine - singleton orchestrator for all running bots.
  * Manages setInterval-based tick loops per bot.
  */
+const MAX_CONSECUTIVE_ERRORS = 5; // stop bot only after this many consecutive failures
+
 class BotEngine {
   constructor() {
     // Map: botId (string) => { intervalId, timeframe }
     this.runningBots = new Map();
+    // Map: botId (string) => consecutive error count
+    this._errorCounts = new Map();
     this.io = null;
   }
 
@@ -101,6 +105,7 @@ class BotEngine {
       clearInterval(entry.intervalId);
       this.runningBots.delete(id);
     }
+    this._errorCounts.delete(id);
     await BotConfig.findByIdAndUpdate(botId, {
       status: 'stopped',
       stoppedAt: new Date()
@@ -248,6 +253,13 @@ class BotEngine {
         console.warn(`[BotEngine] Bot ${botId} paused: ${pauseReason}`);
       }
 
+      // Successful tick — reset the consecutive error counter
+      if (this._errorCounts.has(botId)) {
+        this._errorCounts.delete(botId);
+        // Clear the transient error message from the previous failure
+        await BotConfig.findByIdAndUpdate(botId, { statusMessage: '' }).catch(() => {});
+      }
+
       // Emit real-time tick update (includes analysis for BotDetail page)
       if (this.io) {
         const openCount = await Position.countDocuments({ botId: bot._id, status: 'open' });
@@ -263,16 +275,37 @@ class BotEngine {
       }
 
     } catch (err) {
-      console.error(`[BotEngine] Tick error for bot ${botId}:`, err.message);
-      // Mark bot as error state and stop it
-      await BotConfig.findByIdAndUpdate(botId, {
-        status: 'error',
-        statusMessage: err.message.substring(0, 200)
-      });
-      const entry = this.runningBots.get(botId);
-      if (entry) {
-        clearInterval(entry.intervalId);
-        this.runningBots.delete(botId);
+      const errCount = (this._errorCounts.get(botId) ?? 0) + 1;
+      this._errorCounts.set(botId, errCount);
+
+      console.error(`[BotEngine] Tick error for bot ${botId} (${errCount}/${MAX_CONSECUTIVE_ERRORS}):`, err.message);
+
+      if (errCount >= MAX_CONSECUTIVE_ERRORS) {
+        // Too many consecutive failures — stop the bot
+        console.error(`[BotEngine] Bot ${botId} stopped after ${errCount} consecutive errors.`);
+        await BotConfig.findByIdAndUpdate(botId, {
+          status: 'error',
+          statusMessage: `Stopped after ${errCount} consecutive errors: ${err.message.substring(0, 150)}`
+        });
+        const entry = this.runningBots.get(botId);
+        if (entry) {
+          clearInterval(entry.intervalId);
+          this.runningBots.delete(botId);
+        }
+        this._errorCounts.delete(botId);
+      } else {
+        // Transient error — log it but keep the interval alive
+        await BotConfig.findByIdAndUpdate(botId, {
+          statusMessage: `Last error (${errCount}/${MAX_CONSECUTIVE_ERRORS}): ${err.message.substring(0, 150)}`
+        }).catch(() => {});
+
+        if (this.io && bot) {
+          this.io.to(`user:${bot.userId.toString()}`).emit('bot:error', {
+            botId,
+            botName: bot.name,
+            error: `Tick error (${errCount}/${MAX_CONSECUTIVE_ERRORS}): ${err.message}`,
+          });
+        }
       }
     }
   }

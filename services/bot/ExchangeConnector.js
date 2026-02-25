@@ -1,4 +1,23 @@
 import ccxt from 'ccxt';
+import { HttpsProxyAgent } from 'https-proxy-agent';
+import { SocksProxyAgent } from 'socks-proxy-agent';
+
+// Read proxy from environment (same vars as MarketDataService)
+function getProxyConfig() {
+  const socksProxy = process.env.SOCKS_PROXY || process.env.SOCKS5_PROXY;
+  if (socksProxy) {
+    const agent = new SocksProxyAgent(socksProxy);
+    return { agent };
+  }
+  const httpsProxy = process.env.HTTPS_PROXY || process.env.HTTP_PROXY;
+  if (httpsProxy) {
+    const agent = new HttpsProxyAgent(httpsProxy);
+    return { agent };
+  }
+  return null;
+}
+
+const PROXY_CONFIG = getProxyConfig();
 
 /**
  * ExchangeConnector - singleton CCXT connection pool.
@@ -37,10 +56,12 @@ class ExchangeConnector {
       apiKey,
       secret: apiSecret,
       enableRateLimit: true,
+      timeout: 30_000,       // 30s timeout (default CCXT is 10s — too low for slow networks)
       options: { defaultType: 'spot' }
     };
     if (apiPassphrase) config.password = apiPassphrase;
     if (exchangeAccount.isSandbox) config.sandbox = true;
+    if (PROXY_CONFIG) config.agent = PROXY_CONFIG.agent;
 
     const instance = new ExchangeClass(config);
     await instance.loadMarkets();
@@ -106,7 +127,9 @@ class ExchangeConnector {
     if (!ExchangeClass) {
       throw new Error(`Exchange "${exchangeName}" is not supported by CCXT`);
     }
-    const instance = new ExchangeClass({ enableRateLimit: true });
+    const pubConfig = { enableRateLimit: true, timeout: 30_000 };
+    if (PROXY_CONFIG) pubConfig.agent = PROXY_CONFIG.agent;
+    const instance = new ExchangeClass(pubConfig);
     this.publicPool.set(exchangeName, instance);
     return instance;
   }

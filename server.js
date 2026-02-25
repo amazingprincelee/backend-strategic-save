@@ -27,6 +27,11 @@ import { initializeBackgroundScan } from './services/Arbitrage/ArbitrageService.
 // Bot Trading Engine
 import botEngine from './services/bot/BotEngine.js';
 import BotConfig from './models/bot/BotConfig.js';
+// Hybrid Signal Engine (AI + rules + multi-timeframe)
+import hybridSignalEngine    from './services/HybridSignalEngine.js';
+import signalDeliveryService from './services/SignalDeliveryService.js';
+// JWT utils (for socket handshake verification)
+import { verifyToken } from './utils/jwt.js';
 
 // Load environment variables
 dotenv.config();
@@ -98,6 +103,20 @@ app.get('/', (req, res) => {
   });
 });
 
+// Socket.IO — verify JWT on handshake so stale tokens are rejected early
+io.use((socket, next) => {
+  const token = socket.handshake.auth?.token;
+  if (!token) return next(); // allow unauthenticated connections (they just can't join user rooms)
+  try {
+    socket.user = verifyToken(token); // attach decoded payload for use in handlers
+    next();
+  } catch {
+    // Token invalid / expired — still allow connection but flag it
+    socket.user = null;
+    next();
+  }
+});
+
 // Socket.IO connection handling
 io.on('connection', (socket) => {
   console.log(`Client connected: ${socket.id}`);
@@ -116,6 +135,18 @@ io.on('connection', (socket) => {
       socket.leave(`user:${userAddress.toLowerCase()}`);
       console.log(`User ${userAddress} left their room`);
     }
+  });
+
+  // Join signal tier room (premium = instant signals, free = 5-min delayed)
+  socket.on('join-signals', ({ tier } = {}) => {
+    const room = tier === 'premium' ? 'signals:premium' : 'signals:free';
+    socket.join(room);
+    console.log(`Socket ${socket.id} joined signal room: ${room}`);
+  });
+
+  socket.on('leave-signals', () => {
+    socket.leave('signals:premium');
+    socket.leave('signals:free');
   });
 
   // Handle disconnection
@@ -155,21 +186,32 @@ const startServer = async () => {
     });
     console.log('✅ Order Book Arbitrage Service initialized');
 
+    // Initialize Hybrid Signal Engine (AI + rules + multi-TF)
+    console.log('🧠 Initializing Hybrid Signal Engine...');
+    signalDeliveryService.setIO(io);
+    await hybridSignalEngine.init(io, signalDeliveryService);
+    console.log('✅ Hybrid Signal Engine initialized (AI model loading in background)');
+
     // Initialize Bot Trading Engine
     console.log('🤖 Initializing Bot Trading Engine...');
     botEngine.setIO(io);
-    // Resume any bots that were running when the server last shut down
+    // Resume any bots that were running (or errored mid-run) when the server last shut down
     try {
-      const runningBots = await BotConfig.find({ status: 'running' });
-      for (const bot of runningBots) {
+      // Also recover bots stuck in 'error' — they were running before the error hit
+      const botsToResume = await BotConfig.find({ status: { $in: ['running', 'error'] } });
+      let resumed = 0;
+      for (const bot of botsToResume) {
         try {
+          // Reset status to running before starting so startBot doesn't conflict
+          await BotConfig.findByIdAndUpdate(bot._id, { status: 'running', statusMessage: '' });
           await botEngine.startBot(bot._id);
           console.log(`   ✅ Resumed bot: ${bot.name}`);
+          resumed++;
         } catch (botErr) {
           console.warn(`   ⚠️  Could not resume bot ${bot.name}: ${botErr.message}`);
         }
       }
-      console.log(`✅ Bot Trading Engine initialized (${runningBots.length} bots resumed)`);
+      console.log(`✅ Bot Trading Engine initialized (${resumed} bots resumed)`);
     } catch (botEngineError) {
       console.warn('⚠️  Bot engine initialization warning:', botEngineError.message);
     }
@@ -188,6 +230,10 @@ const startServer = async () => {
       console.log(`🤖 Bot API: http://localhost:${PORT}/api/bots`);
       console.log(`🎮 Demo API: http://localhost:${PORT}/api/demo`);
       console.log(`📋 Strategies: http://localhost:${PORT}/api/strategies`);
+      console.log(`🧠 Signals (spot):    http://localhost:${PORT}/api/signals?type=spot`);
+      console.log(`🧠 Signals (futures): http://localhost:${PORT}/api/signals?type=futures`);
+      console.log(`📈 Signal History:    http://localhost:${PORT}/api/signals/history`);
+      console.log(`🔬 Backtesting:       POST http://localhost:${PORT}/api/signals/backtest`);
       console.log(`${'='.repeat(50)}\n`);
     });
 
