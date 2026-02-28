@@ -43,7 +43,7 @@ const server = createServer(app);
 // Initialize Socket.IO
 const io = new Server(server, {
   cors: {
-    origin: process.env.CLIENT_URL || corsOptions.origin || 'https://smartstrategy.vercel.app',
+    origin: corsOptions.origin,
     methods: ['GET', 'POST'],
     credentials: true,
   },
