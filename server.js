@@ -44,7 +44,7 @@ const server = createServer(app);
 // Initialize Socket.IO
 const io = new Server(server, {
   cors: {
-    origin: corsOptions.origin,
+    origin: 'https://smartstrategy.vercel.app',
     methods: ['GET', 'POST'],
     credentials: true,
   },
@@ -54,16 +54,15 @@ const io = new Server(server, {
 });
 
 app.use(cors({
-  origin: "https://smartstrategy.vercel.app"
+  origin: 'https://smartstrategy.vercel.app',
+  credentials: true,
+  methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
+  allowedHeaders: ['Origin', 'Content-Type', 'Accept', 'Authorization'],
 }));
-
+app.options('*', cors({ origin: 'https://smartstrategy.vercel.app', credentials: true }));
 
 // Trust proxy (important for rate limiting and IP detection)
 app.set('trust proxy', 1);
-
-// CORS must run first — before Helmet — so preflight OPTIONS requests get the
-// Access-Control-Allow-Origin header before any other middleware can interfere
-
 
 // Security middleware
 app.use(helmetConfig);

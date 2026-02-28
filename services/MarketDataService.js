@@ -7,8 +7,6 @@
  */
 
 import axios from 'axios';
-import { HttpsProxyAgent } from 'https-proxy-agent';
-import { SocksProxyAgent } from 'socks-proxy-agent';
 
 // Binance primary + fallback API hosts (tried in order on timeout/error)
 const BINANCE_SPOT_HOSTS = [
@@ -21,30 +19,9 @@ const BINANCE_FUTURES_HOSTS = [
   'https://fapi.binance.com/fapi/v1',
 ];
 
-// Bybit public REST (no API key needed) — used as fallback when Binance is unreachable
-const BYBIT_BASE = 'https://api.bybit.com';
-const BYBIT_TF_MAP = { '1m': '1', '5m': '5', '15m': '15', '1h': '60', '4h': '240', '1d': 'D' };
-
 // Keep top-level vars for compatibility
 const BINANCE_SPOT    = BINANCE_SPOT_HOSTS[0];
 const BINANCE_FUTURES = BINANCE_FUTURES_HOSTS[0];
-
-// Optional proxy from environment — set HTTPS_PROXY or SOCKS_PROXY in your .env
-// Examples:
-//   HTTPS_PROXY=http://user:pass@proxyhost:8080
-//   SOCKS_PROXY=socks5://user:pass@proxyhost:1080
-function buildProxyAgent() {
-  const socksProxy = process.env.SOCKS_PROXY || process.env.SOCKS5_PROXY;
-  if (socksProxy) return new SocksProxyAgent(socksProxy);
-  const httpsProxy = process.env.HTTPS_PROXY || process.env.HTTP_PROXY;
-  if (httpsProxy) return new HttpsProxyAgent(httpsProxy);
-  return null;
-}
-
-const proxyAgent = buildProxyAgent();
-if (proxyAgent) {
-  console.log('[MarketDataService] Using proxy for exchange API requests');
-}
 
 // How many candles to fetch per timeframe (enough to warm all indicators)
 const CANDLE_LIMITS = {
@@ -64,10 +41,7 @@ const CACHE_TTL = {
 
 const FUNDING_CACHE_TTL = 5 * 60_000; // 5 minutes
 
-const http = axios.create({
-  timeout: 15_000,
-  ...(proxyAgent ? { httpsAgent: proxyAgent, httpAgent: proxyAgent } : {}),
-});
+const http = axios.create({ timeout: 15_000 });
 
 // Retry a GET through all fallback hosts for Binance
 async function fetchWithFallback(hosts, path, params) {
@@ -84,47 +58,6 @@ async function fetchWithFallback(hosts, path, params) {
     }
   }
   throw lastErr;
-}
-
-// Fetch candles from Bybit (fallback for when Binance is unreachable)
-async function fetchCandlesFromBybit(symbol, timeframe, limit) {
-  const interval = BYBIT_TF_MAP[timeframe];
-  if (!interval) throw new Error(`Bybit: unsupported timeframe ${timeframe}`);
-
-  const res = await http.get(`${BYBIT_BASE}/v5/market/kline`, {
-    params: { category: 'spot', symbol, interval, limit },
-  });
-
-  // Bybit returns newest-first; reverse to oldest-first
-  const list = res.data?.result?.list ?? [];
-  return list
-    .slice()
-    .reverse()
-    .map(k => ({
-      timestamp: parseInt(k[0]),
-      open:      parseFloat(k[1]),
-      high:      parseFloat(k[2]),
-      low:       parseFloat(k[3]),
-      close:     parseFloat(k[4]),
-      volume:    parseFloat(k[5]),
-    }));
-}
-
-// Fetch 24h ticker from Bybit (fallback)
-async function fetchTickerFromBybit(symbol) {
-  const res  = await http.get(`${BYBIT_BASE}/v5/market/tickers`, {
-    params: { category: 'spot', symbol },
-  });
-  const t = res.data?.result?.list?.[0];
-  if (!t) throw new Error(`Bybit: no ticker data for ${symbol}`);
-  return {
-    lastPrice:          parseFloat(t.lastPrice),
-    priceChangePercent: parseFloat(t.price24hPcnt) * 100,
-    volume:             parseFloat(t.volume24h),
-    quoteVolume:        parseFloat(t.turnover24h),
-    high24h:            parseFloat(t.highPrice24h),
-    low24h:             parseFloat(t.lowPrice24h),
-  };
 }
 
 // ─── Service ─────────────────────────────────────────────────────────────────
@@ -160,26 +93,15 @@ class MarketDataService {
     const hosts = marketType === 'futures' ? BINANCE_FUTURES_HOSTS : BINANCE_SPOT_HOSTS;
     const lim   = limit ?? CANDLE_LIMITS[timeframe] ?? 120;
 
-    let candles;
-    try {
-      const { data } = await fetchWithFallback(hosts, '/klines', { symbol, interval: timeframe, limit: lim });
-      candles = data.map(k => ({
-        timestamp: k[0],
-        open:      parseFloat(k[1]),
-        high:      parseFloat(k[2]),
-        low:       parseFloat(k[3]),
-        close:     parseFloat(k[4]),
-        volume:    parseFloat(k[5]),
-      }));
-    } catch (binanceErr) {
-      // All Binance hosts failed — try Bybit as fallback (spot only)
-      if (marketType === 'spot') {
-        console.warn(`[MarketData] Binance unavailable for ${symbol}/${timeframe}, trying Bybit...`);
-        candles = await fetchCandlesFromBybit(symbol, timeframe, lim);
-      } else {
-        throw binanceErr;
-      }
-    }
+    const { data } = await fetchWithFallback(hosts, '/klines', { symbol, interval: timeframe, limit: lim });
+    const candles = data.map(k => ({
+      timestamp: k[0],
+      open:      parseFloat(k[1]),
+      high:      parseFloat(k[2]),
+      low:       parseFloat(k[3]),
+      close:     parseFloat(k[4]),
+      volume:    parseFloat(k[5]),
+    }));
 
     this._candleCache.set(key, { candles, ts: Date.now() });
     return candles;
@@ -216,25 +138,15 @@ class MarketDataService {
 
     const hosts  = marketType === 'futures' ? BINANCE_FUTURES_HOSTS : BINANCE_SPOT_HOSTS;
 
-    let ticker;
-    try {
-      const { data } = await fetchWithFallback(hosts, '/ticker/24hr', { symbol });
-      ticker = {
-        lastPrice:          parseFloat(data.lastPrice),
-        priceChangePercent: parseFloat(data.priceChangePercent),
-        volume:             parseFloat(data.volume),
-        quoteVolume:        parseFloat(data.quoteVolume),
-        high24h:            parseFloat(data.highPrice),
-        low24h:             parseFloat(data.lowPrice),
-      };
-    } catch (binanceErr) {
-      if (marketType === 'spot') {
-        console.warn(`[MarketData] Binance ticker unavailable for ${symbol}, trying Bybit...`);
-        ticker = await fetchTickerFromBybit(symbol);
-      } else {
-        throw binanceErr;
-      }
-    }
+    const { data } = await fetchWithFallback(hosts, '/ticker/24hr', { symbol });
+    const ticker = {
+      lastPrice:          parseFloat(data.lastPrice),
+      priceChangePercent: parseFloat(data.priceChangePercent),
+      volume:             parseFloat(data.volume),
+      quoteVolume:        parseFloat(data.quoteVolume),
+      high24h:            parseFloat(data.highPrice),
+      low24h:             parseFloat(data.lowPrice),
+    };
 
     this._tickerCache.set(key, { data: ticker, ts: Date.now() });
     return ticker;
