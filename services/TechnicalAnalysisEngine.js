@@ -135,9 +135,12 @@ export async function analyzeSymbol(symbol, timeframe = '1h', marketType = 'spot
   const bearish  = [];
 
   // 1 · RSI
+  //   LONG fires below 38 (oversold) — conservative entry
+  //   SHORT fires above 62 (moderately overbought) — lower than classic 70 so
+  //   it catches pullback entries even during bull-market extensions
   if (rsiVal !== null) {
-    if (rsiVal < 35)      { longScore++;  bullish.push(`RSI oversold (${rsiVal.toFixed(1)})`); }
-    else if (rsiVal > 65) { shortScore++; bearish.push(`RSI overbought (${rsiVal.toFixed(1)})`); }
+    if (rsiVal < 38)      { longScore++;  bullish.push(`RSI oversold (${rsiVal.toFixed(1)})`); }
+    else if (rsiVal > 62) { shortScore++; bearish.push(`RSI overbought (${rsiVal.toFixed(1)})`); }
   }
 
   // 2 · EMA20 vs EMA50 (short-term momentum)
@@ -157,16 +160,18 @@ export async function analyzeSymbol(symbol, timeframe = '1h', marketType = 'spot
   }
 
   // 5 · Bollinger Bands position (0 = at lower band, 1 = at upper band)
+  //   SHORT fires above 0.70 (top 30% of band) — was 0.75, more responsive
   if (bbObj) {
     const bbRange = bbObj.upper - bbObj.lower;
     const bbPos   = bbRange > 0 ? (price - bbObj.lower) / bbRange : 0.5;
     if (bbPos < 0.25)      { longScore++;  bullish.push(`Near lower Bollinger Band (${(bbPos * 100).toFixed(0)}%)`); }
-    else if (bbPos > 0.75) { shortScore++; bearish.push(`Near upper Bollinger Band (${(bbPos * 100).toFixed(0)}%)`); }
+    else if (bbPos > 0.70) { shortScore++; bearish.push(`Near upper Bollinger Band (${(bbPos * 100).toFixed(0)}%)`); }
   }
 
   // 6 · 10-candle price momentum
+  //   SHORT threshold lowered to -0.3% (was -0.5%) — catches mild pullbacks
   if (mom10 > 0.005)       { longScore++;  bullish.push(`Positive price momentum (+${(mom10 * 100).toFixed(2)}%)`); }
-  else if (mom10 < -0.005) { shortScore++; bearish.push(`Negative price momentum (${(mom10 * 100).toFixed(2)}%)`); }
+  else if (mom10 < -0.003) { shortScore++; bearish.push(`Negative price momentum (${(mom10 * 100).toFixed(2)}%)`); }
 
   const maxScore = ema200 !== null ? 6 : 5;
   const MIN_SCORE = 3;
