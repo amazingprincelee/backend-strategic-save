@@ -69,7 +69,17 @@ export const getAvailablePairs = async (req, res) => {
 export const getSignals = async (req, res) => {
   try {
     const marketType = req.query.type === 'futures' ? 'futures' : 'spot';
-    const signals    = await hybridEngine.getSignals(marketType);
+    let signals      = await hybridEngine.getSignals(marketType);
+
+    // If in-memory cache is empty (server restart / between sweeps),
+    // fall back to the most recent signals from DB so users always see something.
+    if (signals.length === 0) {
+      signals = await SignalModel
+        .find({ marketType, status: { $in: ['active', 'hit_tp', 'hit_sl'] } })
+        .sort({ timestamp: -1 })
+        .limit(10)
+        .lean();
+    }
 
     return res.json({
       success: true,

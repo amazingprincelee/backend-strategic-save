@@ -36,6 +36,7 @@ import { verifyToken } from './utils/jwt.js';
 // Technical Analysis Engine + cron sweep
 import cron from 'node-cron';
 import { sweepTopPairs } from './services/TechnicalAnalysisEngine.js';
+import SignalModel from './models/Signal.js';
 
 // Load environment variables
 dotenv.config();
@@ -225,16 +226,42 @@ const startServer = async () => {
       console.warn('⚠️  Bot engine initialization warning:', botEngineError.message);
     }
 
-    // Schedule Technical Analysis Engine background sweep (every 30 min)
-    console.log('📡 Scheduling Technical Analysis sweep (every 30 min)...');
-    cron.schedule('*/30 * * * *', async () => {
+    // Schedule Technical Analysis Engine background sweep (every 5 min)
+    console.log('📡 Scheduling Technical Analysis sweep (every 5 min)...');
+    cron.schedule('*/5 * * * *', async () => {
       try {
         console.log('[TAEngine] Background sweep starting...');
         const signals = await sweepTopPairs('1h');
         console.log(`[TAEngine] Sweep complete: ${signals.length} signal(s) found`);
 
         if (signals.length > 0 && io) {
-          // Emit to premium room (instant) and free room (same sweep, free users see it delayed via their poll)
+          // Persist sweep signals to DB so they survive server restarts
+          try {
+            await SignalModel.insertMany(
+              signals.map(s => ({
+                pair:            s.pair,
+                type:            s.type,
+                entry:           s.entry,
+                stopLoss:        s.stopLoss,
+                takeProfit:      s.takeProfit,
+                riskReward:      s.riskReward,
+                atr:             s.atr,
+                marketType:      s.marketType || 'spot',
+                exchange:        s.exchange   || 'binance',
+                timeframe:       s.timeframe  || '1h',
+                confidenceScore: s.confidenceScore,
+                aiSource:        'rule-based',
+                reasons:         s.reasons    || [],
+                timestamp:       s.timestamp  ? new Date(s.timestamp) : new Date(),
+              })),
+              { ordered: false }          // skip duplicates, don't abort on error
+            );
+          } catch (dbErr) {
+            // E11000 duplicate key — normal if cron fires twice in quick succession
+            if (dbErr.code !== 11000) console.warn('[TAEngine] DB persist error:', dbErr.message);
+          }
+
+          // Emit to premium room (instant) and free room
           io.to('signals:premium').emit('signals:sweep', signals);
           io.to('signals:free').emit('signals:sweep', signals);
         }
