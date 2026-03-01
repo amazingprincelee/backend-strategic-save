@@ -6,19 +6,15 @@ import ccxt from "ccxt";
 class ExchangeManager {
   constructor() {
     this.exchanges = {};
-    // Default exchanges - start with 3 reliable ones to minimize rate limiting
-    // These have good pair coverage and less aggressive rate limits
-    // Users can add more in Settings (up to 10)
+    // Default exchanges — 5 reliable, globally-accessible exchanges with deep
+    // liquidity and generous rate limits.  More = slower scans and more rate
+    // limit errors.  Users can change the list in Settings.
     this.enabledExchangeIds = [
-      "bybit",    // Great USDT pairs, fast, globally accessible
-      "okx",      // Very strong API + deep liquidity
-      "kucoin",   // Excellent altcoin coverage
-      "gateio",   // Many mid-cap & small-cap pairs
-      "mexc",     // Very generous rate limits
-      "bitget",   // Solid and improving liquidity
-      "coinex",   // Stable API, decent altcoins
-      "htx",      // Former Huobi, still strong liquidity
-      "poloniex", // Older but reliable for spot
+      "bybit",  // Great USDT pairs, fast, globally accessible
+      "okx",    // Very strong API + deep liquidity
+      "kucoin", // Excellent altcoin coverage
+      "gateio", // Many mid-cap & small-cap pairs
+      "mexc",   // Very generous rate limits
     ];
     this.initialized = false;
   }

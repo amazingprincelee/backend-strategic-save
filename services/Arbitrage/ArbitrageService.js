@@ -31,9 +31,13 @@ let scanConfig = null;
 let _io = null; // Socket.IO instance (set by initializeBackgroundScan)
 
 // Configuration
-const UPDATE_INTERVAL = 5 * 60 * 1000; // 5 minutes (order books change fast)
-const BATCH_SIZE = 5; // Process 5 symbols at a time
-const BATCH_DELAY_MS = 1000; // 1 second delay between batches
+// Scan every 5 minutes.  Each pair requires one order-book API call per
+// exchange (5 exchanges × N pairs).  With CCXT rate-limiting each call takes
+// ~1-3 s, so keep N ≤ 20 to stay well inside the 5-min window.
+const UPDATE_INTERVAL  = 5 * 60 * 1000; // 5 minutes
+const BATCH_SIZE       = 5;             // pairs per batch
+const BATCH_DELAY_MS   = 500;           // ms between batches (CCXT handles rate-limits itself)
+const MAX_PAIRS_PER_SCAN = 20;          // cap so each scan finishes in < 4 min
 
 // Statistics
 let serviceStats = {
@@ -74,7 +78,8 @@ function getSymbolsToScan(userPreferences = null) {
   if (userPreferences?.symbols && userPreferences.symbols.length > 0) {
     return userPreferences.symbols;
   }
-  return TOP_100_PAIRS;
+  // Cap to the top N pairs so each background scan completes within the interval
+  return TOP_100_PAIRS.slice(0, MAX_PAIRS_PER_SCAN);
 }
 
 /**

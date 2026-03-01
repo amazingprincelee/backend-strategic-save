@@ -187,9 +187,9 @@ const startServer = async () => {
     // Initialize Order Book-based Arbitrage Service
     console.log('🔄 Initializing Order Book Arbitrage Service...');
     initializeBackgroundScan({
-      minProfitPercent: 0.1,
+      minProfitPercent: 0.05,   // lowered from 0.1 — 5+ bps net profit is still real money
       maxSlippagePercent: 0.5,
-      minLiquidityScore: 40,
+      minLiquidityScore: 25,    // lowered from 40 — allows thinner altcoin books
       orderBookDepth: 20,
       tradeSizesToTest: [100, 500, 1000, 2500, 5000],
       io, // push arbitrage:update events to connected clients after each scan

@@ -2,6 +2,8 @@
 
 
 export const TOP_100_PAIRS = [
+  'BTC/USDT',   // Bitcoin — most liquid, best for arb
+  'ETH/USDT',   // Ethereum — 2nd most liquid
   'SOL/USDT',   // Solana
   'XRP/USDT',   // Ripple
   'USDC/USDT',  // USD Coin (skip this one)

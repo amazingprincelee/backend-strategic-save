@@ -24,11 +24,11 @@ import {
  * Configuration for arbitrage detection
  */
 const DEFAULT_CONFIG = {
-  minProfitPercent: 0.1,          // Minimum net profit after all costs (0.1%)
+  minProfitPercent: 0.05,         // Minimum net profit after all costs (5 bps)
   minTradeAmountUSD: 100,         // Minimum trade size
   maxTradeAmountUSD: 10000,       // Maximum trade size to analyze
   maxSlippagePercent: 0.5,        // Maximum acceptable slippage
-  minLiquidityScore: 40,          // Minimum liquidity score (0-100)
+  minLiquidityScore: 25,          // Minimum liquidity score (0-100)
   orderBookDepth: 20,             // Order book depth to fetch
   tradeSizesToTest: [100, 500, 1000, 2500, 5000, 10000] // USD amounts to test
 };
