@@ -6,7 +6,7 @@ export const TOP_100_PAIRS = [
   'ETH/USDT',   // Ethereum — 2nd most liquid
   'SOL/USDT',   // Solana
   'XRP/USDT',   // Ripple
-  'USDC/USDT',  // USD Coin (skip this one)
+  'SUI/USDT',   // Sui — fast-growing, good spread opportunities
   'ADA/USDT',   // Cardano
   'DOGE/USDT',  // Dogecoin
   'TRX/USDT',   // TRON

@@ -37,7 +37,7 @@ let _io = null; // Socket.IO instance (set by initializeBackgroundScan)
 const UPDATE_INTERVAL  = 5 * 60 * 1000; // 5 minutes
 const BATCH_SIZE       = 5;             // pairs per batch
 const BATCH_DELAY_MS   = 500;           // ms between batches (CCXT handles rate-limits itself)
-const MAX_PAIRS_PER_SCAN = 20;          // cap so each scan finishes in < 4 min
+const MAX_PAIRS_PER_SCAN = 30;          // include mid-caps (wider spreads) while staying < 5 min
 
 // Statistics
 let serviceStats = {
@@ -54,11 +54,11 @@ let serviceStats = {
  */
 export function initializeService(config = {}) {
   scanConfig = createConfig({
-    minProfitPercent: config.minProfitPercent ?? 0.1,
+    minProfitPercent: config.minProfitPercent ?? 0.05,
     minTradeAmountUSD: config.minTradeAmountUSD ?? 100,
     maxTradeAmountUSD: config.maxTradeAmountUSD ?? 10000,
     maxSlippagePercent: config.maxSlippagePercent ?? 0.5,
-    minLiquidityScore: config.minLiquidityScore ?? 40,
+    minLiquidityScore: config.minLiquidityScore ?? 20,
     orderBookDepth: config.orderBookDepth ?? 20,
     tradeSizesToTest: config.tradeSizesToTest ?? [100, 500, 1000, 2500, 5000]
   });

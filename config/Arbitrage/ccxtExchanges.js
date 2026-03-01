@@ -10,7 +10,7 @@ class ExchangeManager {
     // liquidity and generous rate limits.  More = slower scans and more rate
     // limit errors.  Users can change the list in Settings.
     this.enabledExchangeIds = [
-      "bybit",  // Great USDT pairs, fast, globally accessible
+      "huobi",  // HTX (Huobi) — globally accessible, deep USDT liquidity
       "okx",    // Very strong API + deep liquidity
       "kucoin", // Excellent altcoin coverage
       "gateio", // Many mid-cap & small-cap pairs
