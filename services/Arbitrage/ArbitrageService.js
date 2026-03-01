@@ -206,7 +206,11 @@ async function processSignificantOpportunities(opportunities) {
     if (newOpportunities.length > 0) {
       console.log(`[Arbitrage] ${newOpportunities.length} new ≥${ALERT_THRESHOLD_PERCENT}% opportunit${newOpportunities.length === 1 ? 'y' : 'ies'} — emailing users`);
 
-      const users = await User.find({ isActive: true, email: { $exists: true, $ne: '' } })
+      const users = await User.find({
+          isActive: true,
+          email: { $exists: true, $ne: '' },
+          role: { $in: ['premium', 'admin'] },
+        })
         .select('email fullName')
         .lean();
 
