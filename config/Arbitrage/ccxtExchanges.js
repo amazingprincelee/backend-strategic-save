@@ -10,15 +10,14 @@ class ExchangeManager {
     // These have good pair coverage and less aggressive rate limits
     // Users can add more in Settings (up to 10)
     this.enabledExchangeIds = [
-      "binance", // Best liquidity, fastest order books
-      "okx", // Very strong API + deep liquidity
-      "bybit", // Great USDT pairs, fast
-      "kucoin", // Excellent altcoin coverage
-      "gateio", // Many mid-cap & small-cap pairs
-      "mexc", // Very generous rate limits
-      "bitget", // Solid and improving liquidity
-      "coinex", // Stable API, decent altcoins
-      "htx", // Former Huobi, still strong liquidity
+      "bybit",    // Great USDT pairs, fast, globally accessible
+      "okx",      // Very strong API + deep liquidity
+      "kucoin",   // Excellent altcoin coverage
+      "gateio",   // Many mid-cap & small-cap pairs
+      "mexc",     // Very generous rate limits
+      "bitget",   // Solid and improving liquidity
+      "coinex",   // Stable API, decent altcoins
+      "htx",      // Former Huobi, still strong liquidity
       "poloniex", // Older but reliable for spot
     ];
     this.initialized = false;

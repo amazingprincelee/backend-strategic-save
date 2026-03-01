@@ -2,11 +2,13 @@
  * MarketDataService.js
  * Fetches multi-timeframe OHLCV data from Binance REST API.
  * Supports Spot and Futures.  Uses in-memory TTL cache per (symbol, tf, market).
+ * Falls back to Bybit via CCXT when Binance is geo-blocked (403/451).
  *
  * Candle format returned: { timestamp, open, high, low, close, volume }
  */
 
 import axios from 'axios';
+import ccxt  from 'ccxt';
 
 // Binance primary + fallback API hosts (tried in order on timeout/error)
 const BINANCE_SPOT_HOSTS = [
@@ -60,6 +62,41 @@ async function fetchWithFallback(hosts, path, params) {
   throw lastErr;
 }
 
+// ─── Bybit fallback (used when Binance is geo-blocked 403/451) ────────────────
+
+const _bybitCache = {};
+
+function getBybitExchange(marketType) {
+  const key = marketType === 'futures' ? 'futures' : 'spot';
+  if (!_bybitCache[key]) {
+    _bybitCache[key] = new ccxt.bybit({
+      enableRateLimit: true,
+      options: { defaultType: marketType === 'futures' ? 'linear' : 'spot' },
+    });
+  }
+  return _bybitCache[key];
+}
+
+// Convert Binance symbol format to CCXT: BTCUSDT → BTC/USDT (spot) or BTC/USDT:USDT (futures)
+function toCcxtSymbol(symbol, marketType) {
+  const base = symbol.endsWith('USDT') ? symbol.slice(0, -4) : symbol.slice(0, -4);
+  return marketType === 'futures' ? `${base}/USDT:USDT` : `${base}/USDT`;
+}
+
+async function fetchFromBybit(symbol, timeframe, limit, marketType) {
+  const exchange   = getBybitExchange(marketType);
+  const ccxtSymbol = toCcxtSymbol(symbol, marketType);
+  const ohlcv      = await exchange.fetchOHLCV(ccxtSymbol, timeframe, undefined, limit);
+  return ohlcv.map(k => ({
+    timestamp: k[0],
+    open:      k[1],
+    high:      k[2],
+    low:       k[3],
+    close:     k[4],
+    volume:    k[5],
+  }));
+}
+
 // ─── Service ─────────────────────────────────────────────────────────────────
 
 class MarketDataService {
@@ -93,15 +130,26 @@ class MarketDataService {
     const hosts = marketType === 'futures' ? BINANCE_FUTURES_HOSTS : BINANCE_SPOT_HOSTS;
     const lim   = limit ?? CANDLE_LIMITS[timeframe] ?? 120;
 
-    const { data } = await fetchWithFallback(hosts, '/klines', { symbol, interval: timeframe, limit: lim });
-    const candles = data.map(k => ({
-      timestamp: k[0],
-      open:      parseFloat(k[1]),
-      high:      parseFloat(k[2]),
-      low:       parseFloat(k[3]),
-      close:     parseFloat(k[4]),
-      volume:    parseFloat(k[5]),
-    }));
+    let candles;
+    try {
+      const { data } = await fetchWithFallback(hosts, '/klines', { symbol, interval: timeframe, limit: lim });
+      candles = data.map(k => ({
+        timestamp: k[0],
+        open:      parseFloat(k[1]),
+        high:      parseFloat(k[2]),
+        low:       parseFloat(k[3]),
+        close:     parseFloat(k[4]),
+        volume:    parseFloat(k[5]),
+      }));
+    } catch (err) {
+      const code = err.response?.status;
+      if (code === 403 || code === 451) {
+        console.warn(`[MarketData] Binance geo-blocked (${code}), falling back to Bybit for ${symbol} ${timeframe}…`);
+        candles = await fetchFromBybit(symbol, timeframe, lim, marketType);
+      } else {
+        throw err;
+      }
+    }
 
     this._candleCache.set(key, { candles, ts: Date.now() });
     return candles;
@@ -138,15 +186,36 @@ class MarketDataService {
 
     const hosts  = marketType === 'futures' ? BINANCE_FUTURES_HOSTS : BINANCE_SPOT_HOSTS;
 
-    const { data } = await fetchWithFallback(hosts, '/ticker/24hr', { symbol });
-    const ticker = {
-      lastPrice:          parseFloat(data.lastPrice),
-      priceChangePercent: parseFloat(data.priceChangePercent),
-      volume:             parseFloat(data.volume),
-      quoteVolume:        parseFloat(data.quoteVolume),
-      high24h:            parseFloat(data.highPrice),
-      low24h:             parseFloat(data.lowPrice),
-    };
+    let ticker;
+    try {
+      const { data } = await fetchWithFallback(hosts, '/ticker/24hr', { symbol });
+      ticker = {
+        lastPrice:          parseFloat(data.lastPrice),
+        priceChangePercent: parseFloat(data.priceChangePercent),
+        volume:             parseFloat(data.volume),
+        quoteVolume:        parseFloat(data.quoteVolume),
+        high24h:            parseFloat(data.highPrice),
+        low24h:             parseFloat(data.lowPrice),
+      };
+    } catch (err) {
+      const code = err.response?.status;
+      if (code === 403 || code === 451) {
+        console.warn(`[MarketData] Binance geo-blocked (${code}), falling back to Bybit ticker for ${symbol}…`);
+        const exchange   = getBybitExchange(marketType);
+        const ccxtSymbol = toCcxtSymbol(symbol, marketType);
+        const t          = await exchange.fetchTicker(ccxtSymbol);
+        ticker = {
+          lastPrice:          t.last        ?? 0,
+          priceChangePercent: t.percentage  ?? 0,
+          volume:             t.baseVolume  ?? 0,
+          quoteVolume:        t.quoteVolume ?? 0,
+          high24h:            t.high        ?? 0,
+          low24h:             t.low         ?? 0,
+        };
+      } else {
+        throw err;
+      }
+    }
 
     this._tickerCache.set(key, { data: ticker, ts: Date.now() });
     return ticker;
@@ -183,16 +252,25 @@ class MarketDataService {
    */
   async fetchHistoricalCandles(symbol, timeframe = '1h', limit = 1000, marketType = 'spot') {
     const hosts  = marketType === 'futures' ? BINANCE_FUTURES_HOSTS : BINANCE_SPOT_HOSTS;
-    const { data } = await fetchWithFallback(hosts, '/klines', { symbol, interval: timeframe, limit });
 
-    return data.map(k => ({
-      timestamp: k[0],
-      open:      parseFloat(k[1]),
-      high:      parseFloat(k[2]),
-      low:       parseFloat(k[3]),
-      close:     parseFloat(k[4]),
-      volume:    parseFloat(k[5]),
-    }));
+    try {
+      const { data } = await fetchWithFallback(hosts, '/klines', { symbol, interval: timeframe, limit });
+      return data.map(k => ({
+        timestamp: k[0],
+        open:      parseFloat(k[1]),
+        high:      parseFloat(k[2]),
+        low:       parseFloat(k[3]),
+        close:     parseFloat(k[4]),
+        volume:    parseFloat(k[5]),
+      }));
+    } catch (err) {
+      const code = err.response?.status;
+      if (code === 403 || code === 451) {
+        console.warn(`[MarketData] Binance geo-blocked (${code}), falling back to Bybit historical for ${symbol}…`);
+        return await fetchFromBybit(symbol, timeframe, limit, marketType);
+      }
+      throw err;
+    }
   }
 
   // ─── Cache management ─────────────────────────────────────────────────────
