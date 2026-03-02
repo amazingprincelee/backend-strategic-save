@@ -61,8 +61,7 @@ const clientCors = {
   ],
   credentials: true,
   methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
-  allowedHeaders: ['Content-Type', 'Authorization', 'X-API-Key', 'X-Requested-With'],
-  exposedHeaders: ['X-Total-Count', 'X-Rate-Limit-Remaining'],
+  
 };
 
 // Handle preflight for all routes
