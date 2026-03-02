@@ -50,6 +50,9 @@ dotenv.config();
 const app = express();
 const server = createServer(app);
 
+// Trust DO's load balancer so rate limiter can read X-Forwarded-For correctly
+app.set('trust proxy', 1);
+
 const clientCors = {
   origin: 'https://smartstrategy.vercel.app',
   credentials: true,
