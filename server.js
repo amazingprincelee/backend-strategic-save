@@ -57,12 +57,21 @@ const clientCors = {
   allowedHeaders: ['Content-Type', 'Authorization'],
 };
 
+// Debug: log every request with its Origin header (visible in DO logs)
+app.use((req, res, next) => {
+  console.log(`[REQ] ${req.method} ${req.path} | origin: ${req.headers.origin || 'none'}`);
+  next();
+});
+
 // CORS
 app.use(cors(clientCors));
 
 // Initialize Socket.IO
+// pingInterval must stay under DO's 30s proxy timeout to prevent 504s on idle polls
 const io = new Server(server, {
   cors: clientCors,
+  pingInterval: 20000,
+  pingTimeout: 8000,
 });
 
 
