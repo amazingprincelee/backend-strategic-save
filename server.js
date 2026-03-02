@@ -53,7 +53,9 @@ const io = new Server(server, {
   allowEIO3: true,
 });
 
-
+// CORS — preflight + all requests
+app.options('*', cors(clientCors));
+app.use(cors(clientCors));
 
 // Trust proxy (important for rate limiting and IP detection)
 app.set('trust proxy', 1);
