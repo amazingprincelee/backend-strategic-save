@@ -13,10 +13,11 @@ class ExchangeManager {
       "okx",       // 0.1% fees — very strong API + deep liquidity
       "kucoin",    // 0.1% fees — excellent altcoin coverage
       "bitget",    // 0.1% fees — globally accessible, good altcoin depth
+      "phemex",    // 0.1% fees — globally accessible, no geo-blocking
       "poloniex",  // 0.155% fees — good altcoin spread coverage
       "gateio",    // 0.2% fees — widest mid/small-cap pair coverage
       "mexc",      // 0.2% fees — very generous rate limits, many altcoins
-      "bybit",     // 0.1% fees — NOTE: may be geo-blocked (CloudFront 403) in some regions
+      "huobi",     // 0.2% fees — HTX, deep liquidity, globally accessible
     ];
     this.initialized = false;
   }

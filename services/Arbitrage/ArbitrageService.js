@@ -13,7 +13,7 @@
  */
 
 import { exchangeManager } from '../../config/Arbitrage/ccxtExchanges.js';
-import { TOP_100_PAIRS } from '../../utils/top100Coins.js';
+import { discoverArbitragePairs, invalidatePairCache, getPairDiscoveryStats } from './DynamicPairDiscovery.js';
 import { scanForArbitrage, createConfig } from './ArbitrageEngine.js';
 import { clearOrderBookCache, getOrderBookCacheStats } from './OrderBookService.js';
 import ArbitrageOpportunity from '../../models/ArbitrageOpportunity.js';
@@ -37,7 +37,7 @@ let _io = null; // Socket.IO instance (set by initializeBackgroundScan)
 const UPDATE_INTERVAL  = 5 * 60 * 1000; // 5 minutes
 const BATCH_SIZE       = 5;             // pairs per batch
 const BATCH_DELAY_MS   = 500;           // ms between batches (CCXT handles rate-limits itself)
-const MAX_PAIRS_PER_SCAN = 80;          // scan well into mid-caps where spreads are wider
+const MAX_PAIRS_PER_SCAN = 110;         // scan full list — small-caps have the widest spreads
 
 // Statistics
 let serviceStats = {
@@ -55,12 +55,12 @@ let serviceStats = {
 export function initializeService(config = {}) {
   scanConfig = createConfig({
     minProfitPercent: config.minProfitPercent ?? 0.05,
-    minTradeAmountUSD: config.minTradeAmountUSD ?? 100,
+    minTradeAmountUSD: config.minTradeAmountUSD ?? 25,       // lowered from 100 — wider net
     maxTradeAmountUSD: config.maxTradeAmountUSD ?? 10000,
-    maxSlippagePercent: config.maxSlippagePercent ?? 0.5,
-    minLiquidityScore: config.minLiquidityScore ?? 20,
+    maxSlippagePercent: config.maxSlippagePercent ?? 0.8,    // raised from 0.5 — mid-caps have more slippage
+    minLiquidityScore: config.minLiquidityScore ?? 10,       // lowered from 20 — allow thinner books
     orderBookDepth: config.orderBookDepth ?? 20,
-    tradeSizesToTest: config.tradeSizesToTest ?? [100, 500, 1000, 2500, 5000]
+    tradeSizesToTest: config.tradeSizesToTest ?? [25, 50, 100, 250, 500, 1000] // start small
   });
 
   console.log('\n🚀 Arbitrage Service Initialized');
@@ -71,15 +71,15 @@ export function initializeService(config = {}) {
 }
 
 /**
- * Get symbols to scan
- * Can be customized by user preferences
+ * Get symbols to scan — uses dynamic discovery, falls back to static list.
+ * Pairs listed on fewer exchanges are prioritised (wider spreads, less competition).
  */
-function getSymbolsToScan(userPreferences = null) {
+async function getSymbolsToScan(userPreferences = null) {
   if (userPreferences?.symbols && userPreferences.symbols.length > 0) {
     return userPreferences.symbols;
   }
-  // Cap to the top N pairs so each background scan completes within the interval
-  return TOP_100_PAIRS.slice(0, MAX_PAIRS_PER_SCAN);
+  const pairs = await discoverArbitragePairs();
+  return pairs.slice(0, MAX_PAIRS_PER_SCAN);
 }
 
 /**
@@ -273,9 +273,10 @@ async function performScan(userPreferences = null) {
   }
 
   try {
-    // Get symbols to scan
-    const symbols = getSymbolsToScan(userPreferences);
-    console.log(`📋 Symbols to scan: ${symbols.length}`);
+    // Get symbols to scan (dynamic discovery — pairs on fewer exchanges = wider spreads)
+    const symbols = await getSymbolsToScan(userPreferences);
+    const discStats = getPairDiscoveryStats();
+    console.log(`📋 Symbols to scan: ${symbols.length} (discovery cache age: ${discStats.cacheAge}s)`);
 
     // Clear order book cache for fresh data
     clearOrderBookCache();
@@ -373,6 +374,8 @@ export async function refreshOpportunities(userPreferences = null) {
 /**
  * Initialize background scanning
  */
+const DISCOVERY_REFRESH_INTERVAL = 60 * 60 * 1000; // 1 hour
+
 export function initializeBackgroundScan(config = {}) {
   console.log('\n🚀 Initializing Arbitrage Background Scanner...');
 
@@ -386,16 +389,35 @@ export function initializeBackgroundScan(config = {}) {
   const { io: _, ...scanOptions } = config;
   initializeService(scanOptions);
 
-  // Initial scan
+  // ── Eager pair discovery at startup (non-blocking) ───────────────────────
+  // Runs in background so the first arbitrage scan gets cached pairs instantly
+  // instead of blocking on loadMarkets() from all exchanges.
+  discoverArbitragePairs()
+    .then(pairs => console.log(`   🔍 Pair discovery ready: ${pairs.length} pairs loaded`))
+    .catch(err  => console.warn(`   ⚠️  Pair discovery startup failed: ${err.message}`));
+
+  // ── Hourly pair re-discovery (independent of scan cycle) ─────────────────
+  // Picks up newly listed coins and re-ranks pairs by arbitrage potential.
+  setInterval(() => {
+    console.log('\n🔄 [PairDiscovery] Hourly refresh triggered');
+    invalidatePairCache();
+    discoverArbitragePairs()
+      .then(pairs => console.log(`   ✅ Pairs re-discovered: ${pairs.length} pairs`))
+      .catch(err  => console.warn(`   ⚠️  Hourly discovery failed: ${err.message}`));
+  }, DISCOVERY_REFRESH_INTERVAL);
+
+  // ── Initial arbitrage scan ────────────────────────────────────────────────
   performScan();
 
-  // Schedule periodic scans
+  // ── Periodic arbitrage scans (every 5 minutes) ───────────────────────────
   setInterval(() => {
     console.log('\n⏰ Scheduled scan triggered');
     performScan();
   }, UPDATE_INTERVAL);
 
-  console.log(`✅ Background scanner started (interval: ${UPDATE_INTERVAL / 1000 / 60} minutes)`);
+  console.log(`✅ Background scanner started`);
+  console.log(`   Scan interval:      ${UPDATE_INTERVAL / 1000 / 60} minutes`);
+  console.log(`   Discovery refresh:  ${DISCOVERY_REFRESH_INTERVAL / 1000 / 60} minutes`);
 }
 
 /**
@@ -431,6 +453,12 @@ export function updateConfig(newConfig) {
   return scanConfig;
 }
 
+/**
+ * Invalidate the dynamic pair discovery cache.
+ * Call this when the exchange list changes so new pairs are re-discovered.
+ */
+export { invalidatePairCache, getPairDiscoveryStats };
+
 // Legacy exports for backward compatibility
 export const getCachedOpportunitiesLegacy = getCachedOpportunities;
 export const isCacheReady = isServiceReady;
@@ -442,5 +470,7 @@ export default {
   refreshOpportunities,
   isServiceReady,
   getServiceStats,
-  updateConfig
+  updateConfig,
+  invalidatePairCache,
+  getPairDiscoveryStats
 };

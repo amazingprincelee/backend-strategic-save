@@ -25,12 +25,12 @@ import {
  */
 const DEFAULT_CONFIG = {
   minProfitPercent: 0.05,         // Minimum net profit after all costs (5 bps)
-  minTradeAmountUSD: 100,         // Minimum trade size
+  minTradeAmountUSD: 25,          // Minimum trade size (lowered to catch more opportunities)
   maxTradeAmountUSD: 10000,       // Maximum trade size to analyze
-  maxSlippagePercent: 0.5,        // Maximum acceptable slippage
-  minLiquidityScore: 25,          // Minimum liquidity score (0-100)
+  maxSlippagePercent: 0.8,        // Maximum acceptable slippage (raised for mid-cap altcoins)
+  minLiquidityScore: 10,          // Minimum liquidity score (lowered to allow thinner order books)
   orderBookDepth: 20,             // Order book depth to fetch
-  tradeSizesToTest: [100, 500, 1000, 2500, 5000, 10000] // USD amounts to test
+  tradeSizesToTest: [25, 50, 100, 250, 500, 1000] // Start small to find more opportunities
 };
 
 /**

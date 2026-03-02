@@ -26,6 +26,7 @@ export const EXCHANGE_FEES = {
   kraken: 0.0026,     // 0.26%
   coinbase: 0.006,    // 0.6% (highest)
   bitget: 0.001,      // 0.1%
+  phemex: 0.001,      // 0.1%
   poloniex: 0.00155,  // 0.155%
   bigone: 0.002,      // 0.2%
   default: 0.002      // 0.2% default assumption
