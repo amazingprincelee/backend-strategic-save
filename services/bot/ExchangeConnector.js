@@ -108,7 +108,6 @@ class ExchangeConnector {
       throw new Error(`Exchange "${exchangeName}" is not supported by CCXT`);
     }
     const pubConfig = { enableRateLimit: true, timeout: 30_000 };
-    if (PROXY_CONFIG) pubConfig.agent = PROXY_CONFIG.agent;
     const instance = new ExchangeClass(pubConfig);
     this.publicPool.set(exchangeName, instance);
     return instance;

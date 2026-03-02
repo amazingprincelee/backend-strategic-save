@@ -296,6 +296,9 @@ export async function scanSymbolForArbitrage(symbol, config = DEFAULT_CONFIG) {
   const opportunities = [];
   const exchangeList = Array.from(orderBooks.keys());
 
+  // Track best near-miss for diagnostics
+  let bestRawSpread = { spread: 0, pair: '', fees: 0 };
+
   // Compare all pairs of exchanges
   for (let i = 0; i < exchangeList.length; i++) {
     for (let j = i + 1; j < exchangeList.length; j++) {
@@ -305,12 +308,35 @@ export async function scanSymbolForArbitrage(symbol, config = DEFAULT_CONFIG) {
       const orderBook1 = orderBooks.get(exchange1);
       const orderBook2 = orderBooks.get(exchange2);
 
+      // Track raw spread diagnostic (best bid on either side vs best ask on the other)
+      const rawSpread1 = orderBook2.bestBid > orderBook1.bestAsk
+        ? ((orderBook2.bestBid - orderBook1.bestAsk) / orderBook1.bestAsk) * 100 : 0;
+      const rawSpread2 = orderBook1.bestBid > orderBook2.bestAsk
+        ? ((orderBook1.bestBid - orderBook2.bestAsk) / orderBook2.bestAsk) * 100 : 0;
+      const rawSpread = Math.max(rawSpread1, rawSpread2);
+      const fees = (getExchangeFee(exchange1) + getExchangeFee(exchange2)) * 100;
+      if (rawSpread > bestRawSpread.spread) {
+        bestRawSpread = {
+          spread: rawSpread,
+          fees,
+          gap: rawSpread - fees,
+          pair: rawSpread1 > rawSpread2
+            ? `buy ${exchange1} → sell ${exchange2}`
+            : `buy ${exchange2} → sell ${exchange1}`
+        };
+      }
+
       const opportunity = detectArbitragePair(orderBook1, orderBook2, config);
 
       if (opportunity) {
         opportunities.push(opportunity);
       }
     }
+  }
+
+  // Log near-miss for symbols that had some spread
+  if (opportunities.length === 0 && bestRawSpread.spread > 0.01) {
+    console.log(`   📊 ${symbol}: best raw spread ${bestRawSpread.spread.toFixed(3)}% (fees ${bestRawSpread.fees.toFixed(2)}%, gap ${bestRawSpread.gap.toFixed(3)}%) — ${bestRawSpread.pair}`);
   }
 
   // Sort by expected profit descending

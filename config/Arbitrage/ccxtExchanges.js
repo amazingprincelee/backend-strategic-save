@@ -10,11 +10,13 @@ class ExchangeManager {
     // liquidity and generous rate limits.  More = slower scans and more rate
     // limit errors.  Users can change the list in Settings.
     this.enabledExchangeIds = [
-      "huobi",  // HTX (Huobi) — globally accessible, deep USDT liquidity
-      "okx",    // Very strong API + deep liquidity
-      "kucoin", // Excellent altcoin coverage
-      "gateio", // Many mid-cap & small-cap pairs
-      "mexc",   // Very generous rate limits
+      "okx",       // 0.1% fees — very strong API + deep liquidity
+      "kucoin",    // 0.1% fees — excellent altcoin coverage
+      "bitget",    // 0.1% fees — globally accessible, good altcoin depth
+      "poloniex",  // 0.155% fees — good altcoin spread coverage
+      "gateio",    // 0.2% fees — widest mid/small-cap pair coverage
+      "mexc",      // 0.2% fees — very generous rate limits, many altcoins
+      "bybit",     // 0.1% fees — NOTE: may be geo-blocked (CloudFront 403) in some regions
     ];
     this.initialized = false;
   }
