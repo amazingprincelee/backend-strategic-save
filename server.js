@@ -54,11 +54,7 @@ const io = new Server(server, {
 });
 
 const clientCors = {
-  origin: [
-    'https://smartstrategy.vercel.app',
-    'http://localhost:5173',
-    'http://localhost:3000',
-  ],
+  origin: 'https://smartstrategy.vercel.app',
   credentials: true,
   methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
   
