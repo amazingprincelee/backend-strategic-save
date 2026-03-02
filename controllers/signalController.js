@@ -1,10 +1,9 @@
 /**
  * signalController.js
  * Handles all signal-related API requests.
- * Delegates to HybridSignalEngine (AI + rules + multi-TF pipeline).
+ * Reads signals from DB (populated every 5 min by TechnicalAnalysisEngine cron sweep).
  */
 
-import hybridEngine      from '../services/HybridSignalEngine.js';
 import backtestEngine   from '../backtesting/BacktestEngine.js';
 import SignalModel       from '../models/Signal.js';
 import BotConfig         from '../models/bot/BotConfig.js';
@@ -69,51 +68,13 @@ export const getAvailablePairs = async (req, res) => {
 export const getSignals = async (req, res) => {
   try {
     const marketType = req.query.type === 'futures' ? 'futures' : 'spot';
-    let signals      = await hybridEngine.getSignals(marketType);
-    let fromDB       = false;
 
-    if (signals.length > 0) {
-      // Persist fresh HybridEngine signals to DB (upsert — keyed on pair+type+hour
-      // so the same signal isn't inserted twice within the same hour).
-      const hourBucket = new Date();
-      hourBucket.setMinutes(0, 0, 0);
-
-      await Promise.all(signals.map(s =>
-        SignalModel.updateOne(
-          { pair: s.pair, type: s.type, marketType, timestamp: { $gte: hourBucket } },
-          {
-            $setOnInsert: {
-              pair:            s.pair,
-              type:            s.type,
-              entry:           s.entry,
-              stopLoss:        s.stopLoss,
-              takeProfit:      s.takeProfit,
-              riskReward:      s.riskReward,
-              atr:             s.atr,
-              marketType,
-              exchange:        s.exchange   || 'binance',
-              timeframe:       s.timeframe  || '1h',
-              confidenceScore: s.confidenceScore,
-              aiProb:          s.aiProb     || null,
-              aiSource:        s.aiSource   || 'rule-based',
-              reasons:         s.reasons    || [],
-              mtfAlignment:    s.mtfAlignment ?? null,
-              timestamp:       s.timestamp  ? new Date(s.timestamp) : new Date(),
-            },
-          },
-          { upsert: true }
-        ).catch(() => {})  // fire-and-forget, never block the response
-      ));
-    } else {
-      // In-memory cache is empty (server restart / between sweeps) →
-      // fall back to the most recent DB signals so users always see something.
-      signals = await SignalModel
-        .find({ marketType })
-        .sort({ timestamp: -1 })
-        .limit(10)
-        .lean();
-      fromDB = true;
-    }
+    // Read most recent signals from DB — populated every 5 min by cron sweep
+    const signals = await SignalModel
+      .find({ marketType })
+      .sort({ timestamp: -1 })
+      .limit(10)
+      .lean();
 
     return res.json({
       success: true,
@@ -123,7 +84,7 @@ export const getSignals = async (req, res) => {
         count:      signals.length,
         timeframe:  '1h (primary)',
         aiPowered:  true,
-        fromDB,
+        fromDB:     true,
         updatedAt:  new Date().toISOString(),
       },
     });
@@ -137,15 +98,28 @@ export const getSignals = async (req, res) => {
 
 export const getStats = async (req, res) => {
   try {
-    const [signalStats, totalBots, activeBots] = await Promise.all([
-      hybridEngine.getPlatformStats(),
+    const since24h = new Date(Date.now() - 24 * 60 * 60 * 1000);
+    const [todaySignals, totalBots, activeBots] = await Promise.all([
+      SignalModel.find({ timestamp: { $gte: since24h } }).lean().catch(() => []),
       BotConfig.countDocuments().catch(() => 0),
       BotConfig.countDocuments({ status: 'running' }).catch(() => 0),
     ]);
 
     return res.json({
       success: true,
-      data: { ...signalStats, totalBots, activeBots },
+      data: {
+        activeSignals:      todaySignals.length,
+        buySignals:         todaySignals.filter(s => s.type === 'LONG').length,
+        sellSignals:        todaySignals.filter(s => s.type === 'SHORT').length,
+        neutralSignals:     0,
+        totalSignalsToday:  todaySignals.length,
+        supportedExchanges: 10,
+        tradingPairs:       20,
+        aiPowered:          true,
+        engineVersion:      '2.0-hybrid',
+        totalBots,
+        activeBots,
+      },
     });
   } catch (err) {
     console.error('[SignalController] getStats error:', err.message);
