@@ -54,15 +54,18 @@ const clientCors = {
   origin: 'https://smartstrategy.vercel.app',
   credentials: true,
   methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
+  allowedHeaders: ['Content-Type', 'Authorization'],
 };
+
+// CORS
+app.use(cors(clientCors));
 
 // Initialize Socket.IO
 const io = new Server(server, {
   cors: clientCors,
 });
 
-// CORS
-app.use(cors(clientCors));
+
 
 // Trust proxy (important for rate limiting and IP detection)
 app.set('trust proxy', 1);
