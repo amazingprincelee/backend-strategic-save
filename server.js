@@ -53,9 +53,15 @@ const io = new Server(server, {
   allowEIO3: true,
 });
 
-// CORS — preflight + all requests
-app.options('*', cors(clientCors));
-app.use(cors(clientCors));
+// CORS — set headers on every response, immediately end OPTIONS preflight
+app.use((req, res, next) => {
+  res.header('Access-Control-Allow-Origin', 'https://smartstrategy.vercel.app');
+  res.header('Access-Control-Allow-Credentials', 'true');
+  res.header('Access-Control-Allow-Methods', 'GET,POST,PUT,PATCH,DELETE,OPTIONS');
+  res.header('Access-Control-Allow-Headers', 'Content-Type,Authorization,X-Requested-With');
+  if (req.method === 'OPTIONS') return res.status(204).end();
+  next();
+});
 
 // Trust proxy (important for rate limiting and IP detection)
 app.set('trust proxy', 1);
