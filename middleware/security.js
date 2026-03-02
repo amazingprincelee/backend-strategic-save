@@ -1,34 +1,6 @@
 import helmet from 'helmet';
 import rateLimit from 'express-rate-limit';
 
-// CORS configuration
-const ALLOWED_ORIGINS = [
-  'https://smartstrategy.vercel.app',
-  'http://localhost:5173',
-  'http://localhost:3000',
-  'http://127.0.0.1:5173',
-];
-
-export const corsOptions = {
-  origin: function (origin, callback) {
-    // Allow requests with no origin (mobile apps, curl, server-to-server)
-    if (!origin) return callback(null, true);
-    if (ALLOWED_ORIGINS.includes(origin)) return callback(null, true);
-    callback(new Error(`CORS: origin '${origin}' not allowed`));
-  },
-  credentials: true,
-  methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
-  allowedHeaders: [
-    'Origin',
-    'X-Requested-With',
-    'Content-Type',
-    'Accept',
-    'Authorization',
-    'X-API-Key'
-  ],
-  exposedHeaders: ['X-Total-Count', 'X-Rate-Limit-Remaining']
-};
-
 // Helmet security configuration
 export const helmetConfig = helmet({
   contentSecurityPolicy: {

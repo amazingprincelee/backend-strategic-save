@@ -10,7 +10,6 @@ import cookieParser from 'cookie-parser';
 // Import configurations and middleware
 import connectDB from './config/database.js';
 import {
-  corsOptions,
   helmetConfig,
   generalLimiter,
   securityHeaders,
@@ -45,20 +44,19 @@ dotenv.config();
 const app = express();
 const server = createServer(app);
 
-// Initialize Socket.IO
-const io = new Server(server, {
-  cors: corsOptions,
-  path: '/socket.io/',
-  transports: ['websocket', 'polling'],
-  allowEIO3: true,
-});
-
 const clientCors = {
   origin: 'https://smartstrategy.vercel.app',
   credentials: true,
   methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
-  
 };
+
+// Initialize Socket.IO
+const io = new Server(server, {
+  cors: clientCors,
+  path: '/socket.io/',
+  transports: ['websocket', 'polling'],
+  allowEIO3: true,
+});
 
 // Handle preflight for all routes
 app.options('*', cors(clientCors));
