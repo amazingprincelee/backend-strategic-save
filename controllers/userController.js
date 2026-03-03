@@ -152,7 +152,7 @@ export const updateUserPreferences = async (req, res) => {
 
     // Update theme preference
     if (theme !== undefined) {
-      const validThemes = ['light', 'dark', 'system'];
+      const validThemes = ['dark', 'darkest'];
       if (!validThemes.includes(theme)) {
         return res.status(400).json({ success: false, message: 'Invalid theme value' });
       }
