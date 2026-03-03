@@ -25,11 +25,11 @@ export const fetchExchanges = async (req, res) => {
 export const getArbitrageOpportunities = async (req, res) => {
   try {
     console.log('📡 API request received for arbitrage opportunities');
-    
+
     const cacheData = getCachedOpportunities();
-    
-    // Check if cache is ready
-    if (!isServiceReady() && !cacheData.isLoading) {
+
+    // Service truly not yet started (no scan has run at all)
+    if (!cacheData.lastUpdate && !cacheData.isLoading) {
       return res.status(503).json({
         success: false,
         message: 'Arbitrage service is initializing. Please try again in a few moments.',
@@ -37,9 +37,9 @@ export const getArbitrageOpportunities = async (req, res) => {
         error: cacheData.error || 'Service not initialized'
       });
     }
-    
-    // If currently loading and no cached data
-    if (cacheData.isLoading && cacheData.opportunities.length === 0) {
+
+    // Currently loading and no scan has completed yet
+    if (cacheData.isLoading && !cacheData.lastUpdate) {
       return res.status(202).json({
         success: false,
         message: 'Arbitrage opportunities are currently being loaded. Please try again later.',
@@ -48,25 +48,45 @@ export const getArbitrageOpportunities = async (req, res) => {
         retryAfter: 60 // seconds
       });
     }
-    
-    // Return cached data (even if currently refreshing)
+
+    // Determine what opportunities to return
+    let opportunities = [...(cacheData.opportunities || [])];
+    let isStale = false;
+
+    // Live cache is empty — fall back to most recent DB history so the page is never blank
+    if (opportunities.length === 0) {
+      const recent = await ArbitrageOpportunity
+        .find({})
+        .sort({ lastSeenAt: -1 })
+        .limit(10)
+        .lean();
+
+      if (recent.length > 0) {
+        opportunities = recent.map(r => ({ ...r, isStale: true, staleSince: r.lastSeenAt }));
+        isStale = true;
+        console.log(`[Arbitrage] No live cache — returning ${recent.length} historical record(s) as stale fallback`);
+      }
+    }
+
+    // Return data (live or stale)
     res.json({
       success: true,
-      count: cacheData.opportunities.length,
-      data: cacheData.opportunities,
+      count: opportunities.length,
+      data: opportunities,
+      isStale,
       metadata: {
         lastUpdate: cacheData.lastUpdate,
         nextUpdate: cacheData.nextUpdate,
         isRefreshing: cacheData.isLoading,
-        dataAge: cacheData.lastUpdate 
-          ? Math.floor((Date.now() - cacheData.lastUpdate.getTime()) / 1000) 
+        dataAge: cacheData.lastUpdate
+          ? Math.floor((Date.now() - cacheData.lastUpdate.getTime()) / 1000)
           : null,
-        dataAgeFormatted: cacheData.lastUpdate 
-          ? formatTimeSince(cacheData.lastUpdate) 
+        dataAgeFormatted: cacheData.lastUpdate
+          ? formatTimeSince(cacheData.lastUpdate)
           : 'N/A'
       }
     });
-    
+
   } catch (error) {
     console.error('❌ Error fetching opportunities:', error);
     res.status(500).json({
@@ -210,7 +230,7 @@ export const getEnabledExchanges = async (req, res) => {
   }
 };
 
-// Get past/stored significant opportunities (≥2% net profit)
+// Get past/stored significant opportunities (≥1% net profit)
 export const getPastOpportunities = async (req, res) => {
   try {
     const { status = 'all', limit = 100 } = req.query;

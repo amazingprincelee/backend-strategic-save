@@ -129,10 +129,10 @@ function analyzeDirection(buyOrderBook, sellOrderBook, config) {
   // Get fees
   const costs = calculateTotalCosts(buyOrderBook.exchange, sellOrderBook.exchange);
 
-  // Quick check: can the spread cover minimum fees?
-  if (grossSpreadPercent < costs.totalFeesPercent) {
-    return null; // Can't even cover fees
-  }
+  // Note: we intentionally do NOT reject here when grossSpread < fees.
+  // Near-miss opportunities (spread > 0 but eaten by fees) are still reported
+  // so the frontend always shows real market data instead of an empty table.
+  // isProfitableAfterFees = false will be set on these rows.
 
   // Test different trade sizes to find optimal
   let bestOpportunity = null;
@@ -162,8 +162,11 @@ function analyzeDirection(buyOrderBook, sellOrderBook, config) {
     const totalCosts = costs.totalFeesPercent + vwapResult.totalSlippage;
     const netProfitPercent = vwapResult.grossProfitPercent - totalCosts;
 
-    if (netProfitPercent < config.minProfitPercent) {
-      continue; // Not profitable enough
+    // Show near-miss opportunities down to -5% net profit.
+    // Truly profitable opportunities (>= config.minProfitPercent) are prioritised;
+    // near-miss ones are shown with isProfitableAfterFees = false.
+    if (netProfitPercent < -5) {
+      continue; // Way too far underwater — skip
     }
 
     // Calculate liquidity scores
@@ -233,6 +236,10 @@ function analyzeDirection(buyOrderBook, sellOrderBook, config) {
         // Confidence
         confidenceScore,
         riskLevel: confidenceScore >= 70 ? 'Low' : confidenceScore >= 50 ? 'Medium' : 'High',
+
+        // Profitability flag — false = near-miss (spread exists but eaten by fees)
+        isProfitableAfterFees: netProfitPercent >= 0,
+        feesPercent: costs.totalFeesPercent,
 
         // Metadata
         timestamp: Date.now(),
@@ -334,9 +341,9 @@ export async function scanSymbolForArbitrage(symbol, config = DEFAULT_CONFIG) {
     }
   }
 
-  // Log near-miss for symbols that had some spread
-  if (opportunities.length === 0 && bestRawSpread.spread > 0.01) {
-    console.log(`   📊 ${symbol}: best raw spread ${bestRawSpread.spread.toFixed(3)}% (fees ${bestRawSpread.fees.toFixed(2)}%, gap ${bestRawSpread.gap.toFixed(3)}%) — ${bestRawSpread.pair}`);
+  // Log near-miss for symbols that had any positive cross-exchange spread
+  if (opportunities.length === 0 && bestRawSpread.spread > 0) {
+    console.log(`   📊 ${symbol}: best raw spread ${bestRawSpread.spread.toFixed(4)}% (fees ${bestRawSpread.fees.toFixed(2)}%, gap ${bestRawSpread.gap.toFixed(4)}%) — ${bestRawSpread.pair}`);
   }
 
   // Sort by expected profit descending

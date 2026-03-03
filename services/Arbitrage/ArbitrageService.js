@@ -17,10 +17,11 @@ import { discoverArbitragePairs, invalidatePairCache, getPairDiscoveryStats } fr
 import { scanForArbitrage, createConfig } from './ArbitrageEngine.js';
 import { clearOrderBookCache, getOrderBookCacheStats } from './OrderBookService.js';
 import ArbitrageOpportunity from '../../models/ArbitrageOpportunity.js';
+import Notification from '../../models/Notification.js';
 import User from '../../models/User.js';
 import emailService from '../../utils/emailService.js';
 
-const ALERT_THRESHOLD_PERCENT = 2; // minimum net profit % to store + email
+const ALERT_THRESHOLD_PERCENT = 1; // minimum net profit % to store + email + in-app notification
 
 // Cache for storing opportunities
 let cachedOpportunities = [];
@@ -54,7 +55,7 @@ let serviceStats = {
  */
 export function initializeService(config = {}) {
   scanConfig = createConfig({
-    minProfitPercent: config.minProfitPercent ?? 0.05,
+    minProfitPercent: config.minProfitPercent ?? 0.01,
     minTradeAmountUSD: config.minTradeAmountUSD ?? 25,       // lowered from 100 — wider net
     maxTradeAmountUSD: config.maxTradeAmountUSD ?? 10000,
     maxSlippagePercent: config.maxSlippagePercent ?? 0.8,    // raised from 0.5 — mid-caps have more slippage
@@ -226,6 +227,9 @@ async function processSignificantOpportunities(opportunities) {
         const emailedIds = newOpportunities.map(o => o._id);
         await ArbitrageOpportunity.updateMany({ _id: { $in: emailedIds } }, { emailSent: true });
       }
+
+      // In-app notifications (bell dropdown + browser notification) for premium/admin users
+      await emitArbitrageNotifications(newOpportunities);
     }
 
     if (significant.length > 0) {
@@ -234,6 +238,59 @@ async function processSignificantOpportunities(opportunities) {
   } catch (err) {
     // Non-fatal — don't let DB errors break the scan cycle
     console.error('[Arbitrage] processSignificantOpportunities error:', err.message);
+  }
+}
+
+/**
+ * Emit in-app notifications to premium/admin users for new high-profit opportunities.
+ * Creates a persisted Notification document + emits notification:new over Socket.IO.
+ * Non-fatal — errors are swallowed so they never break the scan cycle.
+ */
+async function emitArbitrageNotifications(newOpportunities) {
+  if (!_io || newOpportunities.length === 0) return;
+  try {
+    const users = await User.find({
+      isActive: true,
+      role: { $in: ['premium', 'admin'] },
+      walletAddress: { $exists: true, $ne: '' },
+    }).select('_id walletAddress').lean();
+
+    if (users.length === 0) return;
+
+    // Notify for at most the top 3 new opportunities to avoid flooding
+    const toNotify = newOpportunities.slice(0, 3);
+
+    for (const opp of toNotify) {
+      const oppId = opp.opportunityId || `${opp.symbol}-${opp.buyExchange}-${opp.sellExchange}`;
+      const profit = (opp.netProfitPercent || 0).toFixed(2);
+
+      for (const user of users) {
+        try {
+          const notif = await Notification.create({
+            userId:      user._id,
+            userAddress: user.walletAddress.toLowerCase(),
+            type:        'arbitrage_alert',
+            title:       `Arbitrage Alert: ${opp.symbol}`,
+            message:     `${profit}% net profit — Buy on ${opp.buyExchange}, sell on ${opp.sellExchange}`,
+            data: {
+              actionUrl:     '/arbitrage',
+              opportunityId: oppId,
+              symbol:        opp.symbol,
+            },
+            priority:  opp.netProfitPercent >= 2 ? 'urgent' : 'high',
+            expiresAt: new Date(Date.now() + 24 * 60 * 60 * 1000), // 24 h
+          });
+
+          _io.to(`user:${user.walletAddress}`).emit('notification:new', notif.toObject());
+        } catch (innerErr) {
+          console.warn(`[Arbitrage] Notification failed for user ${user.walletAddress}:`, innerErr.message);
+        }
+      }
+    }
+
+    console.log(`[Arbitrage] In-app notifications sent for ${toNotify.length} opportunit${toNotify.length === 1 ? 'y' : 'ies'} to ${users.length} user${users.length === 1 ? '' : 's'}`);
+  } catch (err) {
+    console.error('[Arbitrage] emitArbitrageNotifications error:', err.message);
   }
 }
 
@@ -421,10 +478,12 @@ export function initializeBackgroundScan(config = {}) {
 }
 
 /**
- * Check if service is ready
+ * Check if service is ready.
+ * Returns true once the first scan has completed — even if it found 0 opportunities.
+ * The controller handles the empty-cache case by falling back to DB history.
  */
 export function isServiceReady() {
-  return cachedOpportunities.length > 0 && lastUpdateTime !== null;
+  return lastUpdateTime !== null;
 }
 
 /**

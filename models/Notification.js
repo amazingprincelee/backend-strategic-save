@@ -25,7 +25,8 @@ const notificationSchema = new mongoose.Schema({
       'withdrawal_completed',
       'platform_update',
       'security_alert',
-      'maintenance_notice'
+      'maintenance_notice',
+      'arbitrage_alert'
     ],
     index: true
   },
@@ -59,6 +60,14 @@ const notificationSchema = new mongoose.Schema({
       default: null
     },
     actionUrl: {
+      type: String,
+      default: null
+    },
+    opportunityId: {
+      type: String,
+      default: null
+    },
+    symbol: {
       type: String,
       default: null
     }

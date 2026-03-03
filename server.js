@@ -214,10 +214,10 @@ const startServer = async () => {
     // Initialize Order Book-based Arbitrage Service
     console.log('🔄 Initializing Order Book Arbitrage Service...');
     initializeBackgroundScan({
-      minProfitPercent: 0.05,
+      minProfitPercent: 0.01,
       minTradeAmountUSD: 25,
       maxSlippagePercent: 0.8,
-      minLiquidityScore: 10,
+      minLiquidityScore: 5,
       orderBookDepth: 20,
       tradeSizesToTest: [25, 50, 100, 250, 500, 1000],
       io,
