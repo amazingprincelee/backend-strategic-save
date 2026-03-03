@@ -54,7 +54,11 @@ const server = createServer(app);
 app.set('trust proxy', 1);
 
 const clientCors = {
-  origin: 'https://smartstrategy.vercel.app',
+  origin: [
+    'https://smartstrategy.vercel.app',
+    'http://localhost:5173',
+    'http://localhost:3000',
+  ],
   credentials: true,
   methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
   allowedHeaders: ['Content-Type', 'Authorization'],
