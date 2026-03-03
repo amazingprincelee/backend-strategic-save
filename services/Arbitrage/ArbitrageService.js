@@ -21,7 +21,7 @@ import Notification from '../../models/Notification.js';
 import User from '../../models/User.js';
 import emailService from '../../utils/emailService.js';
 
-const ALERT_THRESHOLD_PERCENT = 1; // minimum net profit % to store + email + in-app notification
+const ALERT_THRESHOLD_PERCENT = 0.20; // minimum net profit % to store + email + in-app notification
 
 // Cache for storing opportunities
 let cachedOpportunities = [];

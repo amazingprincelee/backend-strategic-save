@@ -17,7 +17,7 @@ router.get('/fetch-exchanges', fetchExchanges);
 // Get cached arbitrage opportunities (recommended endpoint)
 router.get('/fetch-opportunity', getArbitrageOpportunities);
 
-// Get stored significant opportunities (≥2% net profit) — history + monitoring
+// Get stored significant opportunities (≥0.20% net profit) — history + monitoring
 // ?status=all|active|cleared  &limit=100
 router.get('/past-opportunities', getPastOpportunities);
 

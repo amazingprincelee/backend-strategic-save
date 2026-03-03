@@ -230,26 +230,46 @@ export const getEnabledExchanges = async (req, res) => {
   }
 };
 
-// Get past/stored significant opportunities (≥1% net profit)
+// Get past/stored significant opportunities (≥0.20% net profit)
 export const getPastOpportunities = async (req, res) => {
   try {
-    const { status = 'all', limit = 100 } = req.query;
+    const { status = 'all', limit = 10, page = 1 } = req.query;
+    const pageNum  = Math.max(1, parseInt(page)  || 1);
+    const limitNum = Math.min(Math.max(1, parseInt(limit) || 10), 100);
+    const skip     = (pageNum - 1) * limitNum;
+
     const query = status !== 'all' ? { status } : {};
 
-    const opportunities = await ArbitrageOpportunity.find(query)
-      .sort({ firstDetectedAt: -1 })
-      .limit(Math.min(parseInt(limit) || 100, 200))
-      .lean();
+    const [opportunities, filteredTotal, activeCount, clearedCount] = await Promise.all([
+      ArbitrageOpportunity.find(query)
+        .sort({ firstDetectedAt: -1 })
+        .skip(skip)
+        .limit(limitNum)
+        .lean(),
+      ArbitrageOpportunity.countDocuments(query),
+      ArbitrageOpportunity.countDocuments({ status: 'active' }),
+      ArbitrageOpportunity.countDocuments({ status: 'cleared' }),
+    ]);
 
-    // Summary counts
-    const activeCount  = await ArbitrageOpportunity.countDocuments({ status: 'active' });
-    const clearedCount = await ArbitrageOpportunity.countDocuments({ status: 'cleared' });
+    const pages = Math.ceil(filteredTotal / limitNum) || 1;
 
     res.json({
       success: true,
       count: opportunities.length,
       data: opportunities,
-      meta: { activeCount, clearedCount, total: activeCount + clearedCount },
+      meta: {
+        activeCount,
+        clearedCount,
+        total: activeCount + clearedCount,
+      },
+      pagination: {
+        page:     pageNum,
+        limit:    limitNum,
+        total:    filteredTotal,
+        pages,
+        hasNext:  pageNum < pages,
+        hasPrev:  pageNum > 1,
+      },
     });
   } catch (err) {
     console.error('❌ Error fetching past opportunities:', err);
