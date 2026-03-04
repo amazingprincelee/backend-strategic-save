@@ -5,6 +5,36 @@
 
 const STRATEGY_CATALOG = [
   {
+    id: 'dca',
+    name: 'Simple DCA',
+    description: 'Buys a fixed dollar amount at regular time intervals regardless of price. Simple, proven, and effective for long-term accumulation. Supports futures with configurable leverage.',
+    riskLevel: 'low',
+    timeframe: '4h',
+    supportedMarkets: ['spot', 'futures'],
+    isDefault: false,
+    bestFor: ['Long-term accumulation', 'Beginners', 'Passive investing'],
+    defaultParams: {
+      dcaIntervalHours: 24,
+      dcaAmountPerOrder: 100,
+      fixedTakeProfitPercent: 2.0,
+      stopLossAtrMultiplier: 3.0,
+      leverage: 1
+    }
+  },
+  {
+    id: 'ai_signal',
+    name: 'AI Signal Bot',
+    description: 'Uses a multi-indicator technical analysis engine (RSI, EMA20/50/200, MACD, Bollinger Bands, momentum) to detect high-confidence LONG opportunities. Fires when ≥3 of 6 indicators agree. ATR-based SL/TP guarantees a 2:1 R:R on every trade.',
+    riskLevel: 'low',
+    timeframe: '1h',
+    supportedMarkets: ['spot', 'futures'],
+    isDefault: false,
+    bestFor: ['Trending markets', 'AI-driven trading', 'Consistent R:R management'],
+    defaultParams: {
+      leverage: 1
+    }
+  },
+  {
     id: 'adaptive_grid',
     name: 'Adaptive Grid Averager',
     description: 'Splits capital into portions and buys dips using ATR-based grid spacing with multi-confirmation trend filters (EMA50/200 + market structure). Structure-based take-profit targets actual resistance levels. Best for ranging or downtrending markets.',
@@ -25,23 +55,6 @@ const STRATEGY_CATALOG = [
       trailingStopActivationPercent: 2.0,
       trailingStopDistancePercent: 0.5,
       stopLossAtrMultiplier: 2.0
-    }
-  },
-  {
-    id: 'dca',
-    name: 'Simple DCA',
-    description: 'Buys a fixed dollar amount at regular time intervals regardless of price. Simple, proven, and effective for long-term accumulation. Supports futures with configurable leverage.',
-    riskLevel: 'low',
-    timeframe: '4h',
-    supportedMarkets: ['spot', 'futures'],
-    isDefault: false,
-    bestFor: ['Long-term accumulation', 'Beginners', 'Passive investing'],
-    defaultParams: {
-      dcaIntervalHours: 24,
-      dcaAmountPerOrder: 100,
-      fixedTakeProfitPercent: 2.0,
-      stopLossAtrMultiplier: 3.0,
-      leverage: 1
     }
   },
   {
@@ -105,19 +118,6 @@ const STRATEGY_CATALOG = [
       stopLossAtrMultiplier: 2.0
     }
   },
-  {
-    id: 'ai_signal',
-    name: 'AI Signal Bot',
-    description: 'Uses a multi-indicator technical analysis engine (RSI, EMA20/50/200, MACD, Bollinger Bands, momentum) to detect high-confidence LONG opportunities. Fires when ≥3 of 6 indicators agree. ATR-based SL/TP guarantees a 2:1 R:R on every trade.',
-    riskLevel: 'low',
-    timeframe: '1h',
-    supportedMarkets: ['spot', 'futures'],
-    isDefault: false,
-    bestFor: ['Trending markets', 'AI-driven trading', 'Consistent R:R management'],
-    defaultParams: {
-      leverage: 1
-    }
-  }
 ];
 
 export const getStrategyCatalog = (req, res) => {
