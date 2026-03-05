@@ -48,6 +48,7 @@ dotenv.config();
 
 // Create Express app
 const app = express();
+app.set('trust proxy', 1);
 const server = createServer(app);
 
 
@@ -82,15 +83,16 @@ app.use(cors({
 
 // Initialize Socket.IO
 // pingInterval must stay under DO's 30s proxy timeout to prevent 504s on idle polls
+// Initialize Socket.IO
 const io = new Server(server, {
   cors: {
     origin: ALLOWED_ORIGINS,
     credentials: true,
-    methods: ['GET', 'POST'],  // Polling uses GET/POST; WebSocket upgrade uses GET
+    methods: ['GET', 'POST'],
     allowedHeaders: ['Content-Type', 'Authorization'],
   },
   pingInterval: 20000,
-  pingTimeout: 60000,  // Increase to 60s to avoid premature disconnects if responses lag
+  pingTimeout: 60000,  // Matches ~60s proxy timeout; prevents premature disconnects
 });
 
 // Rate limiting
