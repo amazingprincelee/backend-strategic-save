@@ -83,9 +83,13 @@ app.use(cors({
 // Initialize Socket.IO
 // pingInterval must stay under DO's 30s proxy timeout to prevent 504s on idle polls
 const io = new Server(server, {
-  cors: 'https://smartstrategy.vercel.app',
-  pingInterval: 20000,
-});
+    cors: {
+      origin: "https://smartstrategy.vercel.app",
+      credentials: true,
+      methods: ["GET", "POST"]
+    },
+    transports: ['websocket', 'polling']
+  });
 
 // Rate limiting
 app.use(generalLimiter);
