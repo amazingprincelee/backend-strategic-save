@@ -50,8 +50,7 @@ dotenv.config();
 const app = express();
 const server = createServer(app);
 
-// Trust DO's load balancer so rate limiter can read X-Forwarded-For correctly
-app.set('trust proxy', 1);
+
 
 // ── CORS ─────────────────────────────────────────────────────────────────────
 // Using a function instead of a static array so the server reflects the exact
@@ -64,23 +63,7 @@ const ALLOWED_ORIGINS = [
   'http://localhost:3000',
 ];
 
-const clientCors = {
-  origin: (origin, callback) => {
-    // Allow requests with no origin (mobile apps, curl, Postman, server-to-server)
-    if (!origin) return callback(null, true);
 
-    if (ALLOWED_ORIGINS.includes(origin)) {
-      // Reflect the actual request origin so the header always matches
-      callback(null, origin);
-    } else {
-      console.warn(`[CORS] Blocked request from origin: ${origin}`);
-      callback(new Error(`CORS policy: origin "${origin}" is not allowed`));
-    }
-  },
-  credentials: true,
-  methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
-  allowedHeaders: ['Content-Type', 'Authorization'],
-};
 // ─────────────────────────────────────────────────────────────────────────────
 
 // Debug: log every request with its Origin header (visible in DO logs)
@@ -90,7 +73,12 @@ app.use((req, res, next) => {
 });
 
 // CORS
-app.use(cors(clientCors));
+app.use(cors({
+  origin: ALLOWED_ORIGINS ,
+  credentials: true,
+  methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
+  allowedHeaders: ['Content-Type', 'Authorization'],
+}));
 
 // Initialize Socket.IO
 // pingInterval must stay under DO's 30s proxy timeout to prevent 504s on idle polls
