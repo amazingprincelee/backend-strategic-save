@@ -10,6 +10,7 @@
  */
 
 import marketDataService from './MarketDataService.js';
+import { getSentiment } from './GateNewsService.js';
 
 // ─── Pure-JS indicator helpers ─────────────────────────────────────────────────
 
@@ -213,6 +214,24 @@ export async function analyzeSymbol(symbol, timeframe = '1h', marketType = 'spot
     volRatio: +volRatio.toFixed(2),
   };
 
+  // ── News sentiment filter (Gate.io) ───────────────────────────────────────
+  // Fetch non-blocking — if Gate.io is unreachable, news is neutral and the
+  // signal passes through unchanged.
+  let newsSentiment = { score: 0, sentiment: 'neutral', articles: [], suppresses: null };
+  try {
+    newsSentiment = await getSentiment(symbol);
+
+    if (signalType && newsSentiment.suppresses === signalType) {
+      console.log(
+        `[TAEngine] ${symbol} ${signalType} suppressed by news sentiment ` +
+        `(score=${newsSentiment.score}, sentiment=${newsSentiment.sentiment})`
+      );
+      signalType = null; // news overrides the TA signal
+    }
+  } catch (newsErr) {
+    console.warn(`[TAEngine] News sentiment check failed for ${symbol}: ${newsErr.message}`);
+  }
+
   // ── Neutral result (no signal) ─────────────────────────────────────────────
   if (!signalType) {
     return {
@@ -225,6 +244,7 @@ export async function analyzeSymbol(symbol, timeframe = '1h', marketType = 'spot
       shortScore,
       maxScore,
       indicators,
+      newsSentiment,
       reasons:      [],
       message:      `Market is neutral — ${longScore} bullish vs ${shortScore} bearish indicators (need ≥ ${MIN_SCORE} to agree)`,
       timestamp:    new Date().toISOString(),
@@ -241,25 +261,26 @@ export async function analyzeSymbol(symbol, timeframe = '1h', marketType = 'spot
   const riskReward = +(tpDist / slDist).toFixed(2);
 
   return {
-    signal:         signalType,
-    pair:           symbol,
-    type:           signalType,
+    signal:          signalType,
+    pair:            symbol,
+    type:            signalType,
     timeframe,
     marketType,
-    exchange:       'Binance',
+    exchange:        'Binance',
     entry,
     stopLoss,
     takeProfit,
     riskReward,
-    atr:            atrVal,
+    atr:             atrVal,
     confidenceScore: confidence,
-    currentPrice:   price,
+    currentPrice:    price,
     longScore,
     shortScore,
     maxScore,
     indicators,
-    reasons:        signalType === 'LONG' ? bullish : bearish,
-    timestamp:      new Date().toISOString(),
+    newsSentiment,
+    reasons:         signalType === 'LONG' ? bullish : bearish,
+    timestamp:       new Date().toISOString(),
   };
 }
 
