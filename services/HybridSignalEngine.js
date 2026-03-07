@@ -62,10 +62,16 @@ class HybridSignalEngine {
 
     await signalModel.init();
 
-    // Train AI model in background (non-blocking)
-    this._trainInBackground().catch(err =>
-      console.warn('[HybridEngine] Background training failed:', err.message)
-    );
+    // Only train if no saved weights were found on disk.
+    // Re-training on every restart is the primary cause of OOM on constrained servers.
+    if (!signalModel.weightsLoadedFromDisk) {
+      console.log('[HybridSignalEngine] No saved weights found — training in background...');
+      this._trainInBackground().catch(err =>
+        console.warn('[HybridEngine] Background training failed:', err.message)
+      );
+    } else {
+      console.log('[HybridSignalEngine] Saved weights loaded — skipping training.');
+    }
 
     console.log('[HybridSignalEngine] Initialized');
   }

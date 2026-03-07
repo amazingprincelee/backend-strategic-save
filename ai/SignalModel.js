@@ -30,11 +30,12 @@ const FEATURE_LEN = 10;
 
 class SignalModel {
   constructor() {
-    this.tf           = null;
-    this.model        = null;
-    this.isTFReady    = false;
-    this.isModelReady = false;
-    this._lock        = false;
+    this.tf                   = null;
+    this.model                = null;
+    this.isTFReady            = false;
+    this.isModelReady         = false;
+    this.weightsLoadedFromDisk = false;
+    this._lock                = false;
   }
 
   // ─── Init ────────────────────────────────────────────────────────────────
@@ -86,16 +87,16 @@ class SignalModel {
 
       console.log(`[SignalModel] Training on ${data.X.length} samples (CPU backend)…`);
       await this.model.fit(xs, ys, {
-        epochs:          80,
+        epochs:          20,
         batchSize:       64,
         validationSplit: 0.15,
         shuffle:         true,
         callbacks: {
           onEpochEnd: (epoch, logs) => {
-            if ((epoch + 1) % 20 === 0) {
+            if ((epoch + 1) % 10 === 0) {
               const acc = logs.acc ?? logs.accuracy ?? 0;
               console.log(
-                `[SignalModel] Epoch ${epoch + 1}/80 — ` +
+                `[SignalModel] Epoch ${epoch + 1}/20 — ` +
                 `loss: ${logs.loss.toFixed(4)}  acc: ${acc.toFixed(4)}`
               );
             }
@@ -105,6 +106,9 @@ class SignalModel {
 
       xs.dispose();
       ys.dispose();
+      // Free any remaining TF.js intermediate tensors from the training run
+      this.tf.engine().startScope();
+      this.tf.engine().endScope();
 
       await this._saveWeights();
       this.isModelReady = true;
@@ -284,7 +288,8 @@ class SignalModel {
       this.model.setWeights(tensors);
       tensors.forEach(t => t.dispose());
 
-      this.isModelReady = true;
+      this.isModelReady         = true;
+      this.weightsLoadedFromDisk = true;
       console.log('[SignalModel] Loaded saved weights from disk');
     } catch (err) {
       console.warn('[SignalModel] Could not load saved weights:', err.message);

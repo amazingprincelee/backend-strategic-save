@@ -67,11 +67,14 @@ const ALLOWED_ORIGINS = [
 
 // ─────────────────────────────────────────────────────────────────────────────
 
-// Debug: log every request with its Origin header (visible in DO logs)
-app.use((req, res, next) => {
-  console.log(`[REQ] ${req.method} ${req.path} | origin: ${req.headers.origin || 'none'}`);
-  next();
-});
+// Log every request with its Origin header — development only.
+// In production this runs on every request and creates constant GC pressure.
+if (process.env.NODE_ENV !== 'production') {
+  app.use((req, res, next) => {
+    console.log(`[REQ] ${req.method} ${req.path} | origin: ${req.headers.origin || 'none'}`);
+    next();
+  });
+}
 
 // CORS
 app.use(cors({

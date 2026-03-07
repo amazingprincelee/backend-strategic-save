@@ -213,6 +213,24 @@ class MarketDataService {
     this._candleCache  = new Map();
     this._fundingCache = new Map();
     this._tickerCache  = new Map();
+
+    // Periodically evict expired cache entries so memory doesn't grow unbounded.
+    setInterval(() => this._pruneCache(), 10 * 60_000); // every 10 minutes
+  }
+
+  _pruneCache() {
+    const now = Date.now();
+    for (const [key, entry] of this._candleCache) {
+      const tf  = key.split(':')[1];
+      const ttl = CACHE_TTL[tf] ?? 60_000;
+      if (now - entry.ts > ttl) this._candleCache.delete(key);
+    }
+    for (const [key, entry] of this._tickerCache) {
+      if (now - entry.ts > 30_000) this._tickerCache.delete(key);
+    }
+    for (const [symbol, entry] of this._fundingCache) {
+      if (now - entry.ts > FUNDING_CACHE_TTL) this._fundingCache.delete(symbol);
+    }
   }
 
   // ─── Candles ─────────────────────────────────────────────────────────────
