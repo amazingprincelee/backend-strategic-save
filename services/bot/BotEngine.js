@@ -12,11 +12,13 @@ import marketDataService from '../MarketDataService.js';
 // Strategy map
 import dca from '../strategies/DCAStrategy.js';
 import smartSignal from '../strategies/SmartSignalStrategy.js';
+import swingRider from '../strategies/SwingRiderStrategy.js';
 
 const STRATEGY_MAP = {
   dca,
   smart_signal: smartSignal,
   ai_signal:    smartSignal,   // legacy alias — existing bots keep working
+  swing_rider:  swingRider,
 };
 
 // Timeframe per strategy (how often the tick loop fires)
@@ -24,6 +26,7 @@ const TIMEFRAME_MAP = {
   dca:          '4h',
   smart_signal: '5m',
   ai_signal:    '5m',
+  swing_rider:  '15m',  // fast enough to catch swings; not noisy like 5m
 };
 
 // Tick interval in ms

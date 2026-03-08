@@ -40,7 +40,7 @@ const botConfigSchema = new mongoose.Schema({
   strategyId: {
     type: String,
     required: true,
-    enum: ['smart_signal', 'dca', 'adaptive_grid', 'rsi_reversal', 'ema_crossover', 'scalper', 'breakout', 'ai_signal']
+    enum: ['smart_signal', 'swing_rider', 'dca', 'adaptive_grid', 'rsi_reversal', 'ema_crossover', 'scalper', 'breakout', 'ai_signal']
   },
   strategyParams: {
     // Adaptive Grid
@@ -72,7 +72,13 @@ const botConfigSchema = new mongoose.Schema({
     maxConcurrentTrades:  { type: Number, default: 2 },
     riskPerTrade:         { type: Number, default: 2 },
     signalMaxAgeMinutes:  { type: Number, default: 20 },
-    // Futures leverage (used by DCA + SmartSignal strategies)
+    // SwingRider specific
+    swingLookback:        { type: Number, default: 5 },
+    maxScaleIns:          { type: Number, default: 2 },
+    scaleInAtrMultiplier: { type: Number, default: 1.5 },
+    riskPerEntry:         { type: Number, default: 1 },
+    minRR:                { type: Number, default: 1.5 },
+    // Futures leverage (used by DCA + SmartSignal + SwingRider strategies)
     leverage: { type: Number, default: 1, min: 1, max: 20 },
   },
   capitalAllocation: {
