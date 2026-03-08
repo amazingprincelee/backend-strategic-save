@@ -1,5 +1,6 @@
 import BotConfig from '../../models/bot/BotConfig.js';
 import Position from '../../models/bot/Position.js';
+import Notification from '../../models/Notification.js';
 import orderManager from './OrderManager.js';
 import riskEngine from './RiskEngine.js';
 import demoSimulator from './DemoSimulator.js';
@@ -259,6 +260,11 @@ class BotEngine {
           this.runningBots.delete(botId);
         }
         console.warn(`[BotEngine] Bot ${botId} paused: ${pauseReason}`);
+        await this._notify(bot, 'bot_paused',
+          `Bot paused: ${bot.name}`,
+          `Risk limit reached — ${pauseReason}. The bot has been paused to protect your capital.`,
+          'high'
+        );
       }
 
       // Successful tick — reset the consecutive error counter
@@ -301,6 +307,13 @@ class BotEngine {
           this.runningBots.delete(botId);
         }
         this._errorCounts.delete(botId);
+        if (bot) {
+          await this._notify(bot, 'bot_error',
+            `Bot stopped: ${bot.name}`,
+            `Stopped after ${errCount} consecutive errors. Last error: ${err.message.substring(0, 120)}`,
+            'urgent'
+          );
+        }
       } else {
         // Transient error — log it but keep the interval alive
         await BotConfig.findByIdAndUpdate(botId, {
@@ -353,6 +366,17 @@ class BotEngine {
       pnl,
       timestamp: new Date().toISOString()
     });
+  }
+
+  async _notify(bot, type, title, message, priority = 'medium') {
+    try {
+      const notification = await Notification.create({ userId: bot.userId, type, title, message, priority });
+      if (this.io) {
+        this.io.to(`user:${bot.userId.toString()}`).emit('notification:new', notification.toObject());
+      }
+    } catch (err) {
+      console.warn(`[BotEngine] Failed to create notification for bot ${bot._id}: ${err.message}`);
+    }
   }
 }
 

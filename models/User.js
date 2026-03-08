@@ -43,7 +43,7 @@ const userSchema = new mongoose.Schema({
       signalAlert: { type: Boolean, default: true },
       tradeExecuted: { type: Boolean, default: true },
       platformUpdates: { type: Boolean, default: false },
-      arbitrageAlert: { type: Boolean, default: true }
+      arbitrageAlert: { type: Boolean, default: false }  // off by default — user must opt in
     },
     inAppNotifications: {
       botAlert: { type: Boolean, default: true },

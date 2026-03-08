@@ -22,7 +22,10 @@ import User from '../../models/User.js';
 import emailService from '../../utils/emailService.js';
 
 const ALERT_THRESHOLD_PERCENT = 0.20; // minimum net profit % to store + email + in-app notification
-const EMAIL_COOLDOWN_MS = 6 * 60 * 60 * 1000; // 6 hours between emails for the same opportunity
+// At most one digest email per user every 12 hours (= max 2/day).
+// All current opportunities are batched into a single email — no per-opportunity spam.
+const DIGEST_COOLDOWN_MS = 12 * 60 * 60 * 1000;
+const _userEmailCooldown = new Map(); // userId (string) → last email timestamp (ms)
 
 // Cache for storing opportunities
 let cachedOpportunities = [];
@@ -210,45 +213,38 @@ async function processSignificantOpportunities(opportunities) {
       { status: 'cleared', clearedAt: now }
     );
 
-    // ── 3. Send email for new/returned opportunities (6-hour cooldown per pair) ──
-    if (newOpportunities.length > 0) {
-      // Only email opportunities that haven't been emailed in the last 6 hours
-      const cooldownEligible = newOpportunities.filter(opp => {
-        if (!opp.lastEmailedAt) return true;
-        return (Date.now() - new Date(opp.lastEmailedAt).getTime()) >= EMAIL_COOLDOWN_MS;
+    // ── 3. Digest email — at most twice/day per user, all opportunities batched ──
+    if (significant.length > 0) {
+      const now = Date.now();
+
+      // Only users who have explicitly opted in (default is OFF)
+      const users = await User.find({
+        isActive: true,
+        email: { $exists: true, $ne: '' },
+        role: { $in: ['premium', 'admin'] },
+        'preferences.emailNotifications.arbitrageAlert': true,
+      }).select('_id email fullName').lean();
+
+      const usersToEmail = users.filter(u => {
+        const lastSent = _userEmailCooldown.get(u._id.toString());
+        return !lastSent || (now - lastSent) >= DIGEST_COOLDOWN_MS;
       });
 
-      if (cooldownEligible.length > 0) {
-        console.log(`[Arbitrage] ${cooldownEligible.length} opportunit${cooldownEligible.length === 1 ? 'y' : 'ies'} passed 6-hour cooldown — emailing opted-in users`);
-
-        // Only email users who have arbitrageAlert enabled (default: true)
-        const users = await User.find({
-          isActive: true,
-          email: { $exists: true, $ne: '' },
-          role: { $in: ['premium', 'admin'] },
-          'preferences.emailNotifications.arbitrageAlert': { $ne: false },
-        })
-        .select('email fullName')
-        .lean();
-
-        if (users.length > 0) {
-          await emailService.sendArbitrageAlert(users, cooldownEligible);
-
-          // Stamp lastEmailedAt so cooldown starts now
-          const emailedIds = cooldownEligible.map(o => o._id);
-          await ArbitrageOpportunity.updateMany(
-            { _id: { $in: emailedIds } },
-            { emailSent: true, lastEmailedAt: new Date() }
-          );
-        } else {
-          console.log('[Arbitrage] No opted-in users to email');
-        }
+      if (usersToEmail.length > 0) {
+        // Send ONE email per user with ALL current opportunities batched
+        await emailService.sendArbitrageAlert(usersToEmail, significant);
+        for (const u of usersToEmail) _userEmailCooldown.set(u._id.toString(), now);
+        console.log(`[Arbitrage] Digest email sent to ${usersToEmail.length} user(s) — ${significant.length} opportunit${significant.length === 1 ? 'y' : 'ies'} batched`);
+      } else if (users.length > 0) {
+        console.log('[Arbitrage] Digest skipped — all opted-in users within 12-hour cooldown');
       } else {
-        console.log(`[Arbitrage] ${newOpportunities.length} new opportunit${newOpportunities.length === 1 ? 'y' : 'ies'} — all within 6-hour cooldown, skipping email`);
+        console.log('[Arbitrage] No users with arbitrage email alerts enabled');
       }
 
-      // In-app notifications are not subject to the email cooldown
-      await emitArbitrageNotifications(newOpportunities);
+      // In-app notifications only for brand-new / returned opportunities
+      if (newOpportunities.length > 0) {
+        await emitArbitrageNotifications(newOpportunities);
+      }
     }
 
     if (significant.length > 0) {

@@ -60,17 +60,24 @@ class HybridSignalEngine {
     this.io              = io;
     this.deliveryService = deliveryService;
 
-    await signalModel.init();
-
-    // Only train if no saved weights were found on disk.
-    // Re-training on every restart is the primary cause of OOM on constrained servers.
-    if (!signalModel.weightsLoadedFromDisk) {
-      console.log('[HybridSignalEngine] No saved weights found — training in background...');
-      this._trainInBackground().catch(err =>
-        console.warn('[HybridEngine] Background training failed:', err.message)
-      );
+    // Set DISABLE_AI=true in your hosting env vars to skip TensorFlow.js entirely.
+    // This saves ~100-150 MB of RAM — recommended on 512 MB instances.
+    // The rule-based predictor (SignalModel._rulePredict) is used automatically as fallback.
+    if (process.env.DISABLE_AI === 'true') {
+      console.log('[HybridSignalEngine] AI disabled (DISABLE_AI=true) — using rule-based predictor only.');
     } else {
-      console.log('[HybridSignalEngine] Saved weights loaded — skipping training.');
+      await signalModel.init();
+
+      // Only train if no saved weights were found on disk.
+      // Re-training on every restart is the primary cause of OOM on constrained servers.
+      if (!signalModel.weightsLoadedFromDisk) {
+        console.log('[HybridSignalEngine] No saved weights found — training in background...');
+        this._trainInBackground().catch(err =>
+          console.warn('[HybridEngine] Background training failed:', err.message)
+        );
+      } else {
+        console.log('[HybridSignalEngine] Saved weights loaded — skipping training.');
+      }
     }
 
     console.log('[HybridSignalEngine] Initialized');

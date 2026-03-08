@@ -9,75 +9,31 @@ import { ethers } from 'ethers';
 export const getUserNotifications = async (req, res) => {
   try {
     const userId = req.user.id;
-
-    // Validate pagination parameters
-    const validatedQuery = await paginationSchema.validate(req.query, {
-      abortEarly: false,
-      stripUnknown: true
-    });
-
-    const { page, limit } = validatedQuery;
+    const page  = Math.max(1, parseInt(req.query.page)  || 1);
+    const limit = Math.min(50, parseInt(req.query.limit) || 20);
     const { unreadOnly, type, priority } = req.query;
 
-    // Build filter query
-    const filterQuery = { userId };
+    // Build extra filters (userId is always applied inside the static method)
+    const filterQuery = {};
+    if (unreadOnly === 'true') filterQuery.isRead = false;
+    if (type)     filterQuery.type     = type;
+    if (priority) filterQuery.priority = priority;
 
-    if (unreadOnly === 'true') {
-      filterQuery.isRead = false;
-    }
-
-    if (type) {
-      filterQuery.type = type;
-    }
-
-    if (priority) {
-      filterQuery.priority = priority;
-    }
-
-    // Don't include archived notifications unless specifically requested
-    if (req.query.includeArchived !== 'true') {
-      filterQuery.isArchived = false;
-    }
-
-    // Get notifications with pagination
-    const notifications = await Notification.getUserNotifications(
-      userId,
-      page,
-      limit,
-      filterQuery
-    );
-
-    // Get unread count
+    const result = await Notification.getUserNotifications(userId, page, limit, filterQuery);
     const unreadCount = await Notification.getUnreadCount(userId);
 
     res.json({
       success: true,
       data: {
-        notifications: notifications.notifications,
-        pagination: notifications.pagination,
+        notifications: result.notifications,
+        currentPage:   result.pagination.currentPage,
+        totalPages:    result.pagination.totalPages,
         unreadCount
       }
     });
-
   } catch (error) {
     console.error('Get user notifications error:', error);
-    
-    if (error.name === 'ValidationError') {
-      const errors = Object.values(error.errors).map(err => ({
-        field: err.path,
-        message: err.message
-      }));
-      return res.status(400).json({
-        success: false,
-        message: 'Validation failed',
-        errors
-      });
-    }
-
-    res.status(500).json({
-      success: false,
-      message: 'Failed to fetch notifications'
-    });
+    res.status(500).json({ success: false, message: 'Failed to fetch notifications' });
   }
 };
 

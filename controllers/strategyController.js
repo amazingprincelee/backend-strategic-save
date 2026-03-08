@@ -5,6 +5,19 @@
 
 const STRATEGY_CATALOG = [
   {
+    id: 'ai_signal',
+    name: 'SmartSignal Bot',
+    description: 'Trades using SmartStrategy\'s own built-in signal engine — the same one that powers the Signals page. Fires when ≥3 of 6 indicators (RSI, EMA20/50/200, MACD, Bollinger Bands, momentum) agree on a LONG entry. ATR-based SL/TP guarantees a 2:1 R:R on every trade.',
+    riskLevel: 'low',
+    timeframe: '1h',
+    supportedMarkets: ['spot', 'futures'],
+    isDefault: true,
+    bestFor: ['Trending markets', 'Signal-based trading', 'Consistent R:R management'],
+    defaultParams: {
+      leverage: 3
+    }
+  },
+  {
     id: 'dca',
     name: 'Simple DCA',
     description: 'Buys a fixed dollar amount at regular time intervals regardless of price. Simple, proven, and effective for long-term accumulation. Supports futures with configurable leverage.',
@@ -22,26 +35,13 @@ const STRATEGY_CATALOG = [
     }
   },
   {
-    id: 'ai_signal',
-    name: 'AI Signal Bot',
-    description: 'Uses a multi-indicator technical analysis engine (RSI, EMA20/50/200, MACD, Bollinger Bands, momentum) to detect high-confidence LONG opportunities. Fires when ≥3 of 6 indicators agree. ATR-based SL/TP guarantees a 2:1 R:R on every trade.',
-    riskLevel: 'low',
-    timeframe: '1h',
-    supportedMarkets: ['spot', 'futures'],
-    isDefault: false,
-    bestFor: ['Trending markets', 'AI-driven trading', 'Consistent R:R management'],
-    defaultParams: {
-      leverage: 1
-    }
-  },
-  {
     id: 'adaptive_grid',
     name: 'Adaptive Grid Averager',
     description: 'Splits capital into portions and buys dips using ATR-based grid spacing with multi-confirmation trend filters (EMA50/200 + market structure). Structure-based take-profit targets actual resistance levels. Best for ranging or downtrending markets.',
     riskLevel: 'medium',
     timeframe: '1h',
     supportedMarkets: ['spot', 'futures'],
-    isDefault: true,
+    isDefault: false,
     bestFor: ['Ranging markets', 'Downtrends', 'Risk-managed accumulation'],
     defaultParams: {
       portions: 5,

@@ -42,6 +42,8 @@ import { verifyToken } from './utils/jwt.js';
 import cron from 'node-cron';
 import { sweepTopPairs } from './services/TechnicalAnalysisEngine.js';
 import SignalModel from './models/Signal.js';
+// Exchange pairs preloader (DB-backed, monthly refresh)
+import { refreshStaleExchangePairs } from './controllers/signalController.js';
 
 // Load environment variables
 dotenv.config();
@@ -302,16 +304,16 @@ const startServer = async () => {
       console.warn('⚠️  Bot engine initialization warning:', botEngineError.message);
     }
 
-    // Schedule Technical Analysis Engine background sweep (every 5 min)
-    // Runs spot + futures in parallel so both signal tabs stay populated.
-    console.log('📡 Scheduling Technical Analysis sweep (every 5 min, spot + futures)...');
-    cron.schedule('*/5 * * * *', async () => {
+    // Schedule Technical Analysis Engine background sweep (every 15 min)
+    // 1h candles close once/hour — scanning every 5 min gives the same result 12× in a row.
+    // 15 min is the professional sweet spot: fresh enough, not wasteful on RAM.
+    console.log('📡 Scheduling Technical Analysis sweep (every 15 min, spot + futures)...');
+    cron.schedule('*/15 * * * *', async () => {
       try {
         console.log('[TAEngine] Background sweep starting (spot + futures)...');
-        const [spotSignals, futuresSignals] = await Promise.all([
-          sweepTopPairs('1h', 'spot'),
-          sweepTopPairs('1h', 'futures'),
-        ]);
+        // Run sequentially (not parallel) to avoid doubling peak RAM usage.
+        const spotSignals    = await sweepTopPairs('1h', 'spot');
+        const futuresSignals = await sweepTopPairs('1h', 'futures');
         const allSignals = [...spotSignals, ...futuresSignals];
         console.log(
           `[TAEngine] Sweep complete: ${spotSignals.length} spot + ${futuresSignals.length} futures signal(s)`
@@ -357,7 +359,39 @@ const startServer = async () => {
         console.warn('[TAEngine] Sweep error:', err.message);
       }
     });
-    console.log('✅ Technical Analysis sweep scheduled (spot + futures)');
+    console.log('✅ Technical Analysis sweep scheduled every 15 min (spot + futures)');
+
+    // Nightly signal cleanup — delete signals older than 30 days at 2 AM UTC.
+    // Prevents the Signal collection from growing unbounded on a budget MongoDB instance.
+    cron.schedule('0 2 * * *', async () => {
+      try {
+        const cutoff = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000);
+        const result = await SignalModel.deleteMany({ timestamp: { $lt: cutoff } });
+        if (result.deletedCount > 0) {
+          console.log(`[Cleanup] Deleted ${result.deletedCount} signal(s) older than 30 days`);
+        }
+      } catch (err) {
+        console.warn('[Cleanup] Signal cleanup error:', err.message);
+      }
+    });
+    console.log('✅ Nightly signal cleanup scheduled (30-day retention, runs at 2 AM UTC)');
+
+    // Exchange pairs preload — refresh stale (>30 days) records in background at startup.
+    // Does NOT block server startup; each exchange logs when done.
+    console.log('📋 Refreshing exchange pairs in background (stale records only)...');
+    refreshStaleExchangePairs().catch(err =>
+      console.warn('[ExchangePairs] Startup refresh error:', err.message)
+    );
+
+    // Monthly cron — refresh all pairs on the 1st of every month at 4 AM UTC.
+    // New coins get listed regularly; monthly is enough to stay current.
+    cron.schedule('0 4 1 * *', () => {
+      console.log('[ExchangePairs] Monthly refresh starting…');
+      refreshStaleExchangePairs().catch(err =>
+        console.warn('[ExchangePairs] Monthly refresh error:', err.message)
+      );
+    });
+    console.log('✅ Exchange pairs monthly refresh scheduled (1st of each month, 4 AM UTC)');
 
   } catch (error) {
     console.error('❌ Failed to start server:', error);

@@ -23,6 +23,8 @@ import {
   runBacktest,
   analyzeSignal,
   getAvailablePairs,
+  getExchangePairs,
+  getAllExchangePairs,
 } from '../controllers/signalController.js';
 
 const router = express.Router();
@@ -30,7 +32,9 @@ const router = express.Router();
 // ── Public endpoints ───────────────────────────────────────────────────────────
 router.get('/',       getSignals);   // ?type=spot|futures
 router.get('/stats',  getStats);
-router.get('/pairs',  getAvailablePairs);  // ?market=spot|futures — cached 1 h
+router.get('/pairs',              getAvailablePairs);    // ?market=spot|futures — cached 1 h
+router.get('/exchange-pairs',     getExchangePairs);     // ?exchange=okx&market=spot|futures — from DB
+router.get('/all-exchange-pairs', getAllExchangePairs);  // all exchanges in one call — for Redux preload
 
 // ── Authenticated endpoints ────────────────────────────────────────────────────
 router.get('/history',    protect, getSignalHistory);

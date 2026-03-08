@@ -9,11 +9,10 @@ const notificationSchema = new mongoose.Schema({
   },
   userAddress: {
     type: String,
-    required: true,
     lowercase: true,
     trim: true,
-    match: [/^0x[a-fA-F0-9]{40}$/, 'Please enter a valid Ethereum address'],
-    index: true
+    index: true,
+    default: null
   },
   type: {
     type: String,
@@ -26,7 +25,10 @@ const notificationSchema = new mongoose.Schema({
       'platform_update',
       'security_alert',
       'maintenance_notice',
-      'arbitrage_alert'
+      'arbitrage_alert',
+      'bot_trade',
+      'bot_paused',
+      'bot_error'
     ],
     index: true
   },
@@ -168,54 +170,42 @@ notificationSchema.statics.createNotification = async function(notificationData)
 };
 
 // Static method to mark notifications as read
-notificationSchema.statics.markAsRead = async function(userAddress, notificationIds = []) {
-  const query = { userAddress: userAddress.toLowerCase() };
-  
+notificationSchema.statics.markAsRead = async function(userId, notificationIds = []) {
+  const query = { userId };
   if (notificationIds.length > 0) {
     query._id = { $in: notificationIds };
   }
-  
-  return this.updateMany(query, {
-    isRead: true,
-    readAt: new Date()
-  });
+  return this.updateMany(query, { isRead: true, readAt: new Date() });
 };
 
 // Static method to get unread count
-notificationSchema.statics.getUnreadCount = function(userAddress) {
-  return this.countDocuments({
-    userAddress: userAddress.toLowerCase(),
-    isRead: false,
-    isArchived: false
-  });
+notificationSchema.statics.getUnreadCount = function(userId) {
+  return this.countDocuments({ userId, isRead: false, isArchived: false });
 };
 
 // Static method to get user notifications with pagination
-notificationSchema.statics.getUserNotifications = function(userAddress, options = {}) {
-  const {
-    page = 1,
-    limit = 20,
-    type = null,
-    isRead = null,
-    priority = null
-  } = options;
-  
-  const query = {
-    userAddress: userAddress.toLowerCase(),
-    isArchived: false
-  };
-  
-  if (type) query.type = type;
-  if (isRead !== null) query.isRead = isRead;
-  if (priority) query.priority = priority;
-  
+notificationSchema.statics.getUserNotifications = async function(userId, page = 1, limit = 20, filterQuery = {}) {
+  const query = { userId, isArchived: false, ...filterQuery };
+  delete query.userId; // avoid duplicate — we set it above
+  query.userId = userId;
+
   const skip = (page - 1) * limit;
-  
-  return this.find(query)
-    .sort({ createdAt: -1 })
-    .skip(skip)
-    .limit(limit)
-    .populate('userId', 'email profile.firstName profile.lastName');
+  const [notifications, total] = await Promise.all([
+    this.find(query).sort({ createdAt: -1 }).skip(skip).limit(limit).lean(),
+    this.countDocuments(query)
+  ]);
+
+  return {
+    notifications,
+    pagination: {
+      currentPage: page,
+      totalPages: Math.ceil(total / limit),
+      total,
+      hasNextPage: page < Math.ceil(total / limit),
+      hasPrevPage: page > 1,
+      limit
+    }
+  };
 };
 
 // Static method to cleanup expired notifications

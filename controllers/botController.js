@@ -84,6 +84,14 @@ export const createBot = async (req, res) => {
       await demoSimulator.getOrCreate(req.user.id);
     }
 
+    // Auto-start the bot immediately — user already reviewed & confirmed via the wizard
+    try {
+      await botEngine.startBot(bot._id);
+    } catch (startErr) {
+      console.warn(`[createBot] Auto-start failed for bot ${bot._id}: ${startErr.message}`);
+      // Bot is still created successfully; client will see 'stopped' status and can start manually
+    }
+
     res.status(201).json({ success: true, data: { bot } });
   } catch (err) {
     res.status(500).json({ success: false, message: err.message });

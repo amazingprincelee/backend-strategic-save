@@ -28,6 +28,9 @@ class DCAStrategy {
       }
     }
 
+    // Let exits process first before considering new entries
+    if (signals.length > 0) return signals;
+
     // Check if it's time for the next DCA buy
     const intervalMs = (params.dcaIntervalHours || 24) * 60 * 60 * 1000;
     const lastBuy = await Trade.findOne({ botId: bot._id, side: 'buy' }).sort({ executedAt: -1 });

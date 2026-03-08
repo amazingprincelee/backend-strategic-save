@@ -9,10 +9,21 @@ import backtestEngine   from '../backtesting/BacktestEngine.js';
 import SignalModel       from '../models/Signal.js';
 import BotConfig         from '../models/bot/BotConfig.js';
 import { analyzeSymbol } from '../services/TechnicalAnalysisEngine.js';
+import ExchangePairs     from '../models/ExchangePairs.js';
 
 // ─── Pair list cache (refreshed every 60 min) ────────────────────────────────
 let _pairsCache = { spot: [], futures: [], fetchedAt: 0 };
 const PAIRS_TTL = 60 * 60 * 1000; // 1 hour
+
+// ─── Exchange pairs (DB-backed, refreshed monthly) ───────────────────────────
+
+// All exchanges shown in the CreateBot dropdown
+const PRELOAD_EXCHANGES = ['okx', 'kucoin', 'bitget', 'phemex', 'gate', 'mexc', 'huobi', 'kraken'];
+const PRELOAD_MARKETS   = ['spot', 'futures'];
+const STALE_DAYS        = 30; // refresh DB records older than this
+
+// Frontend exchange IDs → CCXT exchange IDs (only entries that differ)
+const CCXT_ID = { gate: 'gateio' };
 
 async function fetchGatePairs(market) {
   const url =
@@ -161,6 +172,7 @@ export const getSignalHistory = async (req, res) => {
       marketType,
       type,
       minConfidence = 0,
+      sort   = 'newest',   // 'newest' | 'confidence'
       limit  = 50,
       skip   = 0,
     } = req.query;
@@ -170,10 +182,14 @@ export const getSignalHistory = async (req, res) => {
     if (type)       filter.type = type.toUpperCase();
     if (minConfidence > 0) filter.confidenceScore = { $gte: parseFloat(minConfidence) };
 
+    const sortOrder = sort === 'confidence'
+      ? { confidenceScore: -1, timestamp: -1 }
+      : { timestamp: -1 };
+
     const [signals, total] = await Promise.all([
       SignalModel
         .find(filter)
-        .sort({ timestamp: -1 })
+        .sort(sortOrder)
         .skip(parseInt(skip))
         .limit(Math.min(parseInt(limit), 200))
         .lean(),
@@ -215,6 +231,98 @@ export const analyzeSignal = async (req, res) => {
   } catch (err) {
     console.error('[SignalController] analyzeSignal error:', err.message);
     return res.status(500).json({ success: false, message: err.message });
+  }
+};
+
+// ─── Internal: fetch pairs from CCXT and save to DB ──────────────────────────
+
+async function _fetchAndSavePairs(exchange, market) {
+  const ccxtId = CCXT_ID[exchange] ?? exchange;
+  const { default: ccxt } = await import('ccxt');
+  if (!ccxt[ccxtId]) throw new Error(`Unknown CCXT exchange: ${ccxtId}`);
+
+  const ex      = new ccxt[ccxtId]({ timeout: 20_000 });
+  const markets = await ex.loadMarkets();
+  const isSwap  = market === 'futures';
+
+  const pairs = Object.values(markets)
+    .filter(m => m.active !== false && m.quote === 'USDT' && (isSwap ? (m.swap || m.future) : m.spot))
+    .map(m => m.symbol)
+    .sort();
+
+  await ExchangePairs.findOneAndUpdate(
+    { exchange, market },
+    { pairs, updatedAt: new Date() },
+    { upsert: true, new: true }
+  );
+  return pairs;
+}
+
+// ─── Exported utility: refresh stale exchanges (called on startup + cron) ────
+// Runs entirely in the background — never throws, never blocks the caller.
+
+export async function refreshStaleExchangePairs() {
+  const cutoff = new Date(Date.now() - STALE_DAYS * 24 * 60 * 60 * 1000);
+
+  for (const exchange of PRELOAD_EXCHANGES) {
+    for (const market of PRELOAD_MARKETS) {
+      try {
+        const existing = await ExchangePairs.findOne({ exchange, market }).select('updatedAt').lean();
+        if (existing && existing.updatedAt > cutoff) continue; // still fresh
+
+        const pairs = await _fetchAndSavePairs(exchange, market);
+        console.log(`[ExchangePairs] Refreshed ${exchange}/${market}: ${pairs.length} pairs`);
+      } catch (err) {
+        // Non-fatal — some exchanges may not support futures; log and continue.
+        console.warn(`[ExchangePairs] Could not refresh ${exchange}/${market}: ${err.message}`);
+      }
+    }
+  }
+}
+
+// ─── GET /api/signals/exchange-pairs  (public) ────────────────────────────────
+// ?exchange=okx&market=spot|futures — served from DB (instant after first load)
+
+export const getExchangePairs = async (req, res) => {
+  const { exchange, market = 'spot' } = req.query;
+
+  if (!exchange) {
+    return res.status(400).json({ success: false, message: 'exchange param is required' });
+  }
+
+  try {
+    const doc = await ExchangePairs.findOne({ exchange, market }).select('pairs').lean();
+    if (doc?.pairs?.length) {
+      return res.json({ success: true, data: doc.pairs });
+    }
+
+    // DB miss (first run before startup refresh completes) — fetch live and save
+    const pairs = await _fetchAndSavePairs(exchange, market);
+    return res.json({ success: true, data: pairs });
+  } catch (err) {
+    console.error(`[SignalController] getExchangePairs ${exchange}:`, err.message);
+    return res.status(500).json({ success: false, message: `Failed to load pairs for ${exchange}` });
+  }
+};
+
+// ─── GET /api/signals/all-exchange-pairs  (public) ────────────────────────────
+// Returns all exchanges' pairs in one response so the frontend can preload into
+// Redux global state: { okx: { spot: [...], futures: [...] }, kucoin: {...}, … }
+
+export const getAllExchangePairs = async (req, res) => {
+  try {
+    const docs = await ExchangePairs.find({}).select('exchange market pairs').lean();
+
+    const map = {};
+    for (const doc of docs) {
+      if (!map[doc.exchange]) map[doc.exchange] = {};
+      map[doc.exchange][doc.market] = doc.pairs;
+    }
+
+    return res.json({ success: true, data: map });
+  } catch (err) {
+    console.error('[SignalController] getAllExchangePairs error:', err.message);
+    return res.status(500).json({ success: false, message: 'Failed to load exchange pairs' });
   }
 };
 
