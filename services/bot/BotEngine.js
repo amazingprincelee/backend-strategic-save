@@ -10,33 +10,20 @@ import { calculateRSI, calcVolumeMA, detectTrend } from './IndicatorEngine.js';
 import marketDataService from '../MarketDataService.js';
 
 // Strategy map
-import adaptiveGrid from '../strategies/AdaptiveGridStrategy.js';
 import dca from '../strategies/DCAStrategy.js';
-import rsiReversal from '../strategies/RSIReversalStrategy.js';
-import ema from '../strategies/EMAStrategy.js';
-import scalper from '../strategies/ScalperStrategy.js';
-import breakout from '../strategies/BreakoutStrategy.js';
-import aiSignal from '../strategies/AISignalStrategy.js';
+import smartSignal from '../strategies/SmartSignalStrategy.js';
 
 const STRATEGY_MAP = {
-  adaptive_grid: adaptiveGrid,
   dca,
-  rsi_reversal: rsiReversal,
-  ema_crossover: ema,
-  scalper,
-  breakout,
-  ai_signal: aiSignal
+  smart_signal: smartSignal,
+  ai_signal:    smartSignal,   // legacy alias — existing bots keep working
 };
 
 // Timeframe per strategy (how often the tick loop fires)
 const TIMEFRAME_MAP = {
-  adaptive_grid: '1h',
-  dca: '4h',
-  rsi_reversal: '1h',
-  ema_crossover: '4h',
-  scalper: '5m',
-  breakout: '1d',
-  ai_signal: '1h'
+  dca:          '4h',
+  smart_signal: '5m',
+  ai_signal:    '5m',
 };
 
 // Tick interval in ms
@@ -135,39 +122,56 @@ class BotEngine {
       }
 
       // Fetch OHLCV candles
-      const timeframe = TIMEFRAME_MAP[bot.strategyId] || '1h';
-      const intervalMs = TICK_INTERVAL_MS[timeframe] || 3_600_000;
-      const candles = await this._fetchCandles(bot, timeframe);
-      if (!candles || candles.length < 30) {
-        console.warn(`[BotEngine] Insufficient candle data for bot ${botId}`);
-        return;
+      const timeframe  = TIMEFRAME_MAP[bot.strategyId] || '1h';
+      const intervalMs = TICK_INTERVAL_MS[timeframe]   || 3_600_000;
+      const isMultiPair = bot.symbol === 'MULTI';
+
+      let candles      = [];
+      let currentPrice = null;
+      let currentRSI   = null;
+      let volumeRatio  = null;
+      let trend        = null;
+
+      if (!isMultiPair) {
+        // ── Single-pair strategy (DCA) ─────────────────────────────────────
+        candles = await this._fetchCandles(bot, timeframe);
+        if (!candles || candles.length < 30) {
+          console.warn(`[BotEngine] Insufficient candle data for bot ${botId}`);
+          return;
+        }
+        const closes = candles.map(c => c.close);
+        const volumes = candles.map(c => c.volume);
+        const lastIdx = candles.length - 1;
+        currentPrice = closes[lastIdx];
+
+        const rsiValues = calculateRSI(closes, 14);
+        currentRSI  = rsiValues[lastIdx] != null ? parseFloat(rsiValues[lastIdx].toFixed(2)) : null;
+        const avgVol    = calcVolumeMA(volumes, 20);
+        volumeRatio = avgVol > 0 ? parseFloat((volumes[lastIdx] / avgVol).toFixed(2)) : null;
+        trend       = detectTrend(candles, 50, 200);
       }
-
-      // Compute display indicators from candles
-      const closes  = candles.map(c => c.close);
-      const volumes = candles.map(c => c.volume);
-      const lastIdx = candles.length - 1;
-      const currentPrice = closes[lastIdx];
-
-      const rsiValues  = calculateRSI(closes, 14);
-      const currentRSI = rsiValues[lastIdx] != null ? parseFloat(rsiValues[lastIdx].toFixed(2)) : null;
-
-      const avgVolume    = calcVolumeMA(volumes, 20);
-      const volumeRatio  = avgVolume > 0 ? parseFloat((volumes[lastIdx] / avgVolume).toFixed(2)) : null;
-
-      const trend = detectTrend(candles, 50, 200);
 
       // Load open positions
       const openPositions = await Position.find({ botId: bot._id, status: 'open' });
 
       // Update unrealized P&L and trailing stops for all open positions
       for (const position of openPositions) {
+        // For multi-pair bots fetch current price per position's own symbol
+        if (isMultiPair) {
+          try {
+            const ticker = await marketDataService.fetchTicker(position.symbol, bot.marketType || 'spot');
+            currentPrice = ticker.lastPrice;
+          } catch {
+            currentPrice = position.currentPrice || position.entryPrice;
+          }
+        }
+
         position.currentPrice = currentPrice;
-        const isShort = position.side === 'short';
+        const isShort   = position.side === 'short';
         const priceDiff = isShort
-          ? position.entryPrice - currentPrice   // SHORT profits when price falls
-          : currentPrice - position.entryPrice;  // LONG profits when price rises
-        position.unrealizedPnL = priceDiff * position.amount - position.entryFee;
+          ? position.entryPrice - currentPrice
+          : currentPrice - position.entryPrice;
+        position.unrealizedPnL        = priceDiff * position.amount - position.entryFee;
         position.unrealizedPnLPercent = (priceDiff / position.entryPrice) * 100;
         riskEngine.updateTrailingStop(position, currentPrice, bot.strategyParams);
         await position.save();
@@ -225,8 +229,10 @@ class BotEngine {
           const riskCheck = await riskEngine.checkCanOpenPosition(bot);
           if (riskCheck.allowed) {
             try {
-              const { position } = await orderManager.openPosition(bot, signal);
-              this._emitTrade(bot, 'buy', currentPrice, signal.amount, position._id);
+              // For multi-pair bots the signal carries its own symbol
+              const tradeSymbol = signal.symbol || bot.symbol;
+              const { position } = await orderManager.openPosition(bot, signal, tradeSymbol);
+              this._emitTrade(bot, 'buy', position.entryPrice, signal.amount, position._id, null, tradeSymbol);
             } catch (orderErr) {
               console.error(`[BotEngine] Buy order failed for bot ${botId}:`, orderErr.message);
             }
@@ -239,7 +245,7 @@ class BotEngine {
           if (position) {
             try {
               const { realizedPnL } = await orderManager.closePosition(bot, position, signal.reason);
-              this._emitTrade(bot, 'sell', currentPrice, position.amount, position._id, realizedPnL);
+              this._emitTrade(bot, 'sell', position.currentPrice, position.amount, position._id, realizedPnL, position.symbol);
             } catch (orderErr) {
               console.error(`[BotEngine] Sell order failed for bot ${botId}:`, orderErr.message);
             }
@@ -353,13 +359,13 @@ class BotEngine {
     }));
   }
 
-  _emitTrade(bot, side, price, amount, positionId, pnl = null) {
+  _emitTrade(bot, side, price, amount, positionId, pnl = null, symbol = null) {
     if (!this.io) return;
     this.io.to(`user:${bot.userId.toString()}`).emit('bot:trade', {
-      botId: bot._id.toString(),
-      botName: bot.name,
+      botId:     bot._id.toString(),
+      botName:   bot.name,
       side,
-      symbol: bot.symbol,
+      symbol:    symbol || bot.symbol,
       price,
       amount,
       positionId: positionId?.toString(),

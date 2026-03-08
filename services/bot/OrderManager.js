@@ -16,8 +16,9 @@ class OrderManager {
    * @param {{ portionIndex, amount, takeProfitPrice, stopLossPrice, triggerReason }} signal
    * @returns {Promise<{ trade, position }>}
    */
-  async openPosition(bot, { portionIndex, amount, takeProfitPrice, stopLossPrice, triggerReason = 'entry' }) {
-    const execution = await this._executeOrder(bot, 'buy', amount);
+  async openPosition(bot, { portionIndex, amount, takeProfitPrice, stopLossPrice, triggerReason = 'entry', reason }, symbolOverride) {
+    const symbol    = symbolOverride || bot.symbol;
+    const execution = await this._executeOrder(bot, 'buy', amount, symbol);
 
     // Create trade record
     const trade = await Trade.create({
@@ -25,7 +26,7 @@ class OrderManager {
       userId: bot.userId,
       isDemo: bot.isDemo,
       exchange: bot.exchange,
-      symbol: bot.symbol,
+      symbol,
       side: 'buy',
       type: 'market',
       price: execution.price,
@@ -44,7 +45,7 @@ class OrderManager {
       userId: bot.userId,
       isDemo: bot.isDemo,
       exchange: bot.exchange,
-      symbol: bot.symbol,
+      symbol,
       portionIndex,
       side: 'long',
       entryPrice: execution.price,
@@ -76,7 +77,7 @@ class OrderManager {
    * @returns {Promise<{ trade, realizedPnL }>}
    */
   async closePosition(bot, position, closeReason) {
-    const execution = await this._executeOrder(bot, 'sell', position.amount);
+    const execution = await this._executeOrder(bot, 'sell', position.amount, position.symbol);
 
     const realizedPnL = (execution.price - position.entryPrice) * position.amount
       - position.entryFee
@@ -136,11 +137,13 @@ class OrderManager {
   /**
    * Internal: route order to demo or live exchange.
    */
-  async _executeOrder(bot, side, amount) {
+  async _executeOrder(bot, side, amount, symbolOverride) {
+    const symbol = symbolOverride || bot.symbol;
+
     if (bot.isDemo) {
       return await demoSimulator.executeOrder(bot.userId, {
         exchange: bot.exchange,
-        symbol: bot.symbol,
+        symbol,
         side,
         amount
       });
@@ -162,7 +165,7 @@ class OrderManager {
       exchange.options = { ...exchange.options, defaultType: 'future' };
     }
 
-    const order = await exchange.createMarketOrder(bot.symbol, side, amount);
+    const order = await exchange.createMarketOrder(symbol, side, amount);
 
     return {
       price: order.average || order.price || order.fills?.[0]?.price,

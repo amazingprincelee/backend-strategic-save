@@ -133,18 +133,25 @@ class HybridSignalEngine {
     }
 
     try {
-      const [spot, futures] = await Promise.all([
+      const todayStart = new Date();
+      todayStart.setHours(0, 0, 0, 0);
+
+      const [spot, futures, dbCountToday] = await Promise.all([
         this.getSignals('spot'),
         this.getSignals('futures'),
+        SignalModel.countDocuments({ timestamp: { $gte: todayStart } }).catch(() => 0),
       ]);
       const all = [...spot, ...futures];
+
+      // Use DB count as source of truth; in-memory counter resets on restart
+      const totalSignalsToday = Math.max(this._todayCount(), dbCountToday);
 
       const stats = {
         activeSignals:      all.length,
         buySignals:         all.filter(s => s.type === 'LONG').length,
         sellSignals:        all.filter(s => s.type === 'SHORT').length,
         neutralSignals:     0,
-        totalSignalsToday:  this._todayCount(),
+        totalSignalsToday,
         supportedExchanges: 10,
         tradingPairs:       SPOT_PAIRS.length + FUTURES_PAIRS.length,
         aiPowered:          signalModel.isModelReady,
