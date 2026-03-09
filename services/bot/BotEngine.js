@@ -73,12 +73,19 @@ class BotEngine {
     const timeframe = TIMEFRAME_MAP[bot.strategyId] || '1h';
     const intervalMs = TICK_INTERVAL_MS[timeframe] || 3_600_000;
 
-    // Update status
-    await BotConfig.findByIdAndUpdate(botId, {
+    // Update status + initialize capital stats on first start
+    const capitalUpdate = {
       status: 'running',
       startedAt: new Date(),
-      statusMessage: ''
-    });
+      statusMessage: '',
+    };
+    if (!bot.stats.startingCapital) {
+      // First start — seed stats so drawdown check works correctly from tick 1
+      capitalUpdate['stats.startingCapital'] = bot.capitalAllocation.totalCapital;
+      capitalUpdate['stats.currentCapital']  = bot.capitalAllocation.totalCapital;
+      capitalUpdate['stats.peakCapital']     = bot.capitalAllocation.totalCapital;
+    }
+    await BotConfig.findByIdAndUpdate(botId, capitalUpdate);
 
     // Register interval
     const intervalId = setInterval(() => this._tick(id), intervalMs);
@@ -181,9 +188,11 @@ class BotEngine {
       }
 
       // Update bot capital tracking
+      // Use totalCapital as the base if startingCapital was never seeded (old bots)
+      const startingCapital = bot.stats.startingCapital || bot.capitalAllocation.totalCapital;
       const unrealizedTotal = openPositions.reduce((sum, p) => sum + (p.unrealizedPnL || 0), 0);
-      const currentCapital = bot.stats.startingCapital + bot.stats.totalPnL + unrealizedTotal;
-      const peakCapital = Math.max(bot.stats.peakCapital || bot.capitalAllocation.totalCapital, currentCapital);
+      const currentCapital  = startingCapital + bot.stats.totalPnL + unrealizedTotal;
+      const peakCapital     = Math.max(bot.stats.peakCapital || bot.capitalAllocation.totalCapital, currentCapital);
 
       await BotConfig.findByIdAndUpdate(botId, {
         'stats.currentCapital': currentCapital,

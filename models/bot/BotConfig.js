@@ -71,7 +71,7 @@ const botConfigSchema = new mongoose.Schema({
     minConfidencePercent: { type: Number, default: 70 },
     maxConcurrentTrades:  { type: Number, default: 2 },
     riskPerTrade:         { type: Number, default: 2 },
-    signalMaxAgeMinutes:  { type: Number, default: 20 },
+    signalMaxAgeMinutes:  { type: Number, default: 120 },
     // SwingRider specific
     swingLookback:        { type: Number, default: 5 },
     maxScaleIns:          { type: Number, default: 2 },

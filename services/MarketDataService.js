@@ -271,7 +271,9 @@ class MarketDataService {
   // ─── Ticker ──────────────────────────────────────────────────────────────
 
   async fetchTicker(symbol, marketType = 'spot') {
-    const key    = `ticker:${symbol}:${marketType}`;
+    // Normalize: 'BTC/USDT' → 'BTCUSDT' (Binance REST expects no slash)
+    const sym    = symbol.replace('/', '');
+    const key    = `ticker:${sym}:${marketType}`;
     const cached = this._tickerCache.get(key);
     if (cached && Date.now() - cached.ts < 30_000) return cached.data;
 
@@ -279,7 +281,7 @@ class MarketDataService {
 
     let ticker;
     try {
-      const { data } = await fetchWithFallback(hosts, '/ticker/24hr', { symbol });
+      const { data } = await fetchWithFallback(hosts, '/ticker/24hr', { symbol: sym });
       ticker = {
         lastPrice:          parseFloat(data.lastPrice),
         priceChangePercent: parseFloat(data.priceChangePercent),
@@ -296,7 +298,7 @@ class MarketDataService {
 
       // Fallback: Gate.io 24h ticker
       try {
-        const pair = toGateioSymbol(symbol);
+        const pair = toGateioSymbol(sym);
         const { data } = await httpExt.get(`https://api.gateio.ws/api/v4/spot/tickers`, {
           params: { currency_pair: pair },
         });
@@ -314,7 +316,7 @@ class MarketDataService {
       }
     }
 
-    this._tickerCache.set(key, { data: ticker, ts: Date.now() });
+    this._tickerCache.set(key, { data: ticker, ts: Date.now() }); // key already uses sym
     return ticker;
   }
 

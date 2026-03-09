@@ -5,12 +5,8 @@ import { User } from '../models/index.js';
 // Get current user profile
 export const getCurrentUser = async (req, res) => {
   try {
-    const user = await User.findById(req.user.id)
-      .populate({
-        path: 'investments.vaultId',
-        select: 'vaultId tokenAddress lockDuration unlockTime status'
-      });
-    
+    const user = await User.findById(req.user.id);
+
     if (!user) {
       return res.status(404).json({
         success: false,
@@ -279,12 +275,8 @@ export const changePassword = async (req, res) => {
 // Get user investments
 export const getUserInvestments = async (req, res) => {
   try {
-    const user = await User.findById(req.user.id)
-      .populate({
-        path: 'investments.vaultId',
-        select: 'vaultId tokenAddress tokenSymbol tokenName lockDuration unlockTime status totalDeposited balance'
-      });
-    
+    const user = await User.findById(req.user.id);
+
     if (!user) {
       return res.status(404).json({
         success: false,
@@ -336,9 +328,8 @@ export const getUserInvestments = async (req, res) => {
 // Get user statistics
 export const getUserStatistics = async (req, res) => {
   try {
-    const user = await User.findById(req.user.id)
-      .populate('investments.vaultId');
-    
+    const user = await User.findById(req.user.id);
+
     if (!user) {
       return res.status(404).json({
         success: false,
@@ -347,30 +338,26 @@ export const getUserStatistics = async (req, res) => {
     }
 
     // Calculate statistics
-    const totalInvestments = user.investments.length;
-    const activeInvestments = user.investments.filter(inv => inv.status === 'active').length;
-    const completedInvestments = user.investments.filter(inv => inv.status === 'completed').length;
-    const pendingInvestments = user.investments.filter(inv => inv.status === 'pending').length;
-    
-    const totalInvested = user.investments.reduce((sum, inv) => sum + (inv.amount || 0), 0);
-    const totalReturns = user.investments.reduce((sum, inv) => sum + (inv.returns || 0), 0);
+    const investments = user.investments ?? [];
+    const totalInvestments = investments.length;
+    const activeInvestments = investments.filter(inv => inv.status === 'active').length;
+    const completedInvestments = investments.filter(inv => inv.status === 'completed').length;
+    const pendingInvestments = investments.filter(inv => inv.status === 'pending').length;
+
+    const totalInvested = investments.reduce((sum, inv) => sum + (inv.amount || 0), 0);
+    const totalReturns = investments.reduce((sum, inv) => sum + (inv.returns || 0), 0);
     
     // Calculate average lock duration for active investments
-    const activeInvs = user.investments.filter(inv => inv.status === 'active');
-    const avgLockDuration = activeInvs.length > 0
-      ? activeInvs.reduce((sum, inv) => {
-          const vault = inv.vaultId;
-          return sum + (vault?.lockDuration || 0);
-        }, 0) / activeInvs.length
-      : 0;
+    const activeInvs = investments.filter(inv => inv.status === 'active');
+    const avgLockDuration = 0; // vault feature removed
 
     // Get upcoming maturities (within next 30 days)
     const thirtyDaysFromNow = new Date();
     thirtyDaysFromNow.setDate(thirtyDaysFromNow.getDate() + 30);
-    
-    const upcomingMaturities = user.investments.filter(inv => 
-      inv.status === 'active' && 
-      inv.maturityDate && 
+
+    const upcomingMaturities = investments.filter(inv =>
+      inv.status === 'active' &&
+      inv.maturityDate &&
       new Date(inv.maturityDate) <= thirtyDaysFromNow
     ).length;
 
@@ -576,12 +563,8 @@ export const getUserActivity = async (req, res) => {
   try {
     const { page = 1, limit = 20 } = req.query;
     
-    const user = await User.findById(req.user.id)
-      .populate({
-        path: 'investments.vaultId',
-        select: 'vaultId tokenSymbol'
-      });
-    
+    const user = await User.findById(req.user.id);
+
     if (!user) {
       return res.status(404).json({
         success: false,
@@ -589,17 +572,8 @@ export const getUserActivity = async (req, res) => {
       });
     }
 
-    // Format activity from investments
-    const activities = user.investments
-      .map(inv => ({
-        type: 'investment',
-        action: inv.status,
-        vaultId: inv.vaultId?.vaultId,
-        tokenSymbol: inv.vaultId?.tokenSymbol,
-        amount: inv.amount,
-        timestamp: inv.createdAt
-      }))
-      .sort((a, b) => new Date(b.timestamp) - new Date(a.timestamp));
+    // Format activity (vault/investment feature removed — empty array)
+    const activities = [];
 
     // Add login activity
     if (user.lastLogin) {

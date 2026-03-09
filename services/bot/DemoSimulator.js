@@ -1,4 +1,4 @@
-import exchangeConnector from './ExchangeConnector.js';
+import marketDataService from '../MarketDataService.js';
 import DemoAccount from '../../models/DemoAccount.js';
 
 const TAKER_FEE_RATE = 0.001; // 0.1% simulated taker fee
@@ -6,24 +6,29 @@ const TAKER_FEE_RATE = 0.001; // 0.1% simulated taker fee
 /**
  * DemoSimulator - executes virtual orders using real live market prices.
  * No real trades are placed. Virtual balance is tracked in DemoAccount.
+ *
+ * Uses MarketDataService (Binance → Gate.io → KuCoin fallback) for price
+ * feeds — this avoids CCXT loadMarkets() dependency and geo-block issues.
  */
 class DemoSimulator {
   /**
    * Execute a virtual market order.
    * @param {string|ObjectId} userId
-   * @param {{ exchange: string, symbol: string, side: 'buy'|'sell', amount: number }} params
+   * @param {{ exchange: string, symbol: string, side: 'buy'|'sell'|'short', amount: number, marketType: string }} params
+   *   side = 'short' means futures short entry — no balance debit (P&L settled on close).
    * @returns {Promise<{ price, amount, cost, fee, executedAt }>}
    */
-  async executeOrder(userId, { exchange, symbol, side, amount }) {
-    const publicExchange = exchangeConnector.getPublicInstance(exchange);
+  async executeOrder(userId, { exchange, symbol, side, amount, marketType = 'spot' }) {
+    // Normalize: 'BTC/USDT' → 'BTCUSDT' (MarketDataService uses Binance REST format)
+    const sym = symbol.replace('/', '');
 
     let price;
     try {
-      const ticker = await publicExchange.fetchTicker(symbol);
-      // Use ask for buys (you pay more), bid for sells (you receive less) - realistic spread
-      price = side === 'buy' ? (ticker.ask || ticker.last) : (ticker.bid || ticker.last);
+      const ticker = await marketDataService.fetchTicker(sym, marketType);
+      // Use ask for buys (you pay more), bid for sells (you receive less) — 0.05% spread sim
+      price = side === 'buy' ? ticker.lastPrice * 1.0005 : ticker.lastPrice * 0.9995;
     } catch {
-      throw new Error(`Cannot fetch price for ${symbol} on ${exchange}`);
+      throw new Error(`Cannot fetch price for ${symbol}`);
     }
 
     const cost = price * amount;
@@ -43,10 +48,11 @@ class DemoSimulator {
         );
       }
       demoAccount.virtualBalance -= totalDebit;
-    } else {
-      // Sell: add proceeds minus fee
+    } else if (side === 'sell') {
+      // Close long position: add proceeds minus fee
       demoAccount.virtualBalance += cost - feeCost;
     }
+    // side === 'short' (futures short entry): no immediate balance change — PnL settled on close
 
     demoAccount.totalFeesPaid += feeCost;
     demoAccount.totalTrades += 1;

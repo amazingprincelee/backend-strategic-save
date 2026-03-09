@@ -16,18 +16,20 @@
 
 import Signal from '../../models/Signal.js';
 
-// Sweep runs every 15 min but doesn't fire on startup — use 2 h so there's
-// always valid DB coverage even right after a server restart.
-const DEFAULT_MAX_AGE_MIN = 120;
+// Use a generous window by default — sweep runs every 15 min, so 6 h guarantees
+// there is always coverage regardless of server restarts or sweep timing.
+const DEFAULT_MAX_AGE_MIN = 360; // 6 hours
 
 class SmartSignalStrategy {
   async analyze(bot, _candles, openPositions) {
     const params          = bot.strategyParams || {};
-    const minConfidence   = (params.minConfidencePercent || 70) / 100;
-    const maxConcurrent   = params.maxConcurrentTrades   || 2;
+    const minConfidence   = (params.minConfidencePercent || 50) / 100;
+    const maxConcurrent   = params.maxConcurrentTrades   || 3;
     const riskPct         = params.riskPerTrade          || 2;
     const leverage        = bot.marketType === 'futures' ? (params.leverage || 3) : 1;
-    const maxAgeMs        = (params.signalMaxAgeMinutes  || DEFAULT_MAX_AGE_MIN) * 60 * 1000;
+    // Enforce a minimum of 60 min so the window is never too tight
+    const ageMin          = Math.max(60, params.signalMaxAgeMinutes || DEFAULT_MAX_AGE_MIN);
+    const maxAgeMs        = ageMin * 60 * 1000;
     const capital         = bot.capitalAllocation?.totalCapital || 100;
 
     const signals = [];
@@ -38,8 +40,13 @@ class SmartSignalStrategy {
       const price = pos.currentPrice;
       if (!price) continue;
 
-      const hitTP = pos.takeProfitPrice && price >= pos.takeProfitPrice;
-      const hitSL = pos.stopLossPrice   && price <= pos.stopLossPrice;
+      const isShort = pos.side === 'short';
+      const hitTP = pos.takeProfitPrice && (
+        isShort ? price <= pos.takeProfitPrice : price >= pos.takeProfitPrice
+      );
+      const hitSL = pos.stopLossPrice && (
+        isShort ? price >= pos.stopLossPrice : price <= pos.stopLossPrice
+      );
 
       if (hitTP) {
         signals.push({ action: 'sell', positionId: pos._id, portionIndex: pos.portionIndex, reason: 'take_profit' });
@@ -54,34 +61,56 @@ class SmartSignalStrategy {
     // ── 2. Check capacity ────────────────────────────────────────────────────
     if (openPositions.length >= maxConcurrent) return signals;
 
-    // ── 3. Query fresh high-confidence signals from DB ───────────────────────
-    const cutoff     = new Date(Date.now() - maxAgeMs);
-    const openPairs  = new Set(openPositions.map(p => p.symbol));
-    const slotsLeft  = maxConcurrent - openPositions.length;
+    // ── 3. Query recent signals from DB ─────────────────────────────────────
+    const cutoff    = new Date(Date.now() - maxAgeMs);
+    const marketType = bot.marketType || 'spot';
 
-    const freshSignals = await Signal.find({
+    // Normalize open-position symbols to 'BTCUSDT' form for duplicate check
+    const openPairs = new Set(openPositions.map(p => p.symbol.replace('/', '')));
+    const slotsLeft = maxConcurrent - openPositions.length;
+
+    // Futures bots trade both LONG and SHORT; spot bots are LONG-only
+    const typeFilter = marketType === 'futures' ? { $in: ['LONG', 'SHORT'] } : 'LONG';
+
+    // Do NOT filter by status — status field isn't reliably maintained across
+    // all signal sources (HybridEngine upserts, TAEngine insertMany).
+    // Time-based filtering is the reliable gate.
+    const dbSignals = await Signal.find({
       timestamp:       { $gte: cutoff },
       confidenceScore: { $gte: minConfidence },
-      status:          'active',
-      type:            'LONG',            // LONG only — futures SHORT support coming
-      marketType:      bot.marketType || 'spot',
+      type:            typeFilter,
+      marketType,
     })
       .sort({ confidenceScore: -1, timestamp: -1 })
-      .limit(20)
+      .limit(50)
       .lean();
 
+    console.log(
+      `[SmartSignal] bot=${bot.name} market=${marketType} minConf=${(minConfidence * 100).toFixed(0)}% ` +
+      `window=${ageMin}min → found ${dbSignals.length} candidate(s) in DB, ` +
+      `openPositions=${openPositions.length}/${maxConcurrent}`
+    );
+
     let filled = 0;
-    for (const sig of freshSignals) {
+    for (const sig of dbSignals) {
       if (filled >= slotsLeft) break;
 
-      // Skip pairs already in an open position
-      if (openPairs.has(sig.pair)) continue;
+      // Skip signals with missing price levels
+      if (!sig.entry || !sig.stopLoss || !sig.takeProfit) continue;
+
+      // Normalize pair to 'BTCUSDT' format for both the symbol and dupe-check
+      const tradeSymbol = sig.pair.replace('/', '');
+
+      // Skip if we already have an open position in this pair
+      if (openPairs.has(tradeSymbol)) continue;
 
       const amount = (capital * riskPct / 100 * leverage) / sig.entry;
+      if (!isFinite(amount) || amount <= 0) continue;
 
       signals.push({
         action:          'buy',
-        symbol:          sig.pair,               // ← multi-pair: signal carries its own pair
+        symbol:          tradeSymbol,
+        side:            sig.type === 'SHORT' ? 'short' : 'long',
         portionIndex:    openPositions.length + filled,
         amount,
         takeProfitPrice: sig.takeProfit,
@@ -90,8 +119,16 @@ class SmartSignalStrategy {
         confidence:      sig.confidenceScore,
       });
 
-      openPairs.add(sig.pair);
+      openPairs.add(tradeSymbol);
       filled++;
+      console.log(
+        `[SmartSignal] → queuing ${sig.type} ${tradeSymbol} @ ${sig.entry} ` +
+        `conf=${(sig.confidenceScore * 100).toFixed(0)}%`
+      );
+    }
+
+    if (filled === 0) {
+      console.log(`[SmartSignal] bot=${bot.name} — no actionable signals this tick`);
     }
 
     return signals;

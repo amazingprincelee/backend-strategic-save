@@ -16,9 +16,12 @@ class OrderManager {
    * @param {{ portionIndex, amount, takeProfitPrice, stopLossPrice, triggerReason }} signal
    * @returns {Promise<{ trade, position }>}
    */
-  async openPosition(bot, { portionIndex, amount, takeProfitPrice, stopLossPrice, triggerReason = 'entry', reason }, symbolOverride) {
-    const symbol    = symbolOverride || bot.symbol;
-    const execution = await this._executeOrder(bot, 'buy', amount, symbol);
+  async openPosition(bot, { portionIndex, amount, takeProfitPrice, stopLossPrice, triggerReason = 'entry', reason, side: signalSide }, symbolOverride) {
+    const symbol       = symbolOverride || bot.symbol;
+    const positionSide = signalSide || 'long';
+    // 'short' entry passes 'short' to DemoSimulator (no balance debit); long uses 'buy'
+    const execSide     = positionSide === 'short' ? 'short' : 'buy';
+    const execution    = await this._executeOrder(bot, execSide, amount, symbol);
 
     // Create trade record
     const trade = await Trade.create({
@@ -27,7 +30,7 @@ class OrderManager {
       isDemo: bot.isDemo,
       exchange: bot.exchange,
       symbol,
-      side: 'buy',
+      side: positionSide === 'short' ? 'sell' : 'buy',
       type: 'market',
       price: execution.price,
       amount: execution.amount,
@@ -47,7 +50,7 @@ class OrderManager {
       exchange: bot.exchange,
       symbol,
       portionIndex,
-      side: 'long',
+      side: positionSide,
       entryPrice: execution.price,
       amount: execution.amount,
       cost: execution.cost,
@@ -77,11 +80,15 @@ class OrderManager {
    * @returns {Promise<{ trade, realizedPnL }>}
    */
   async closePosition(bot, position, closeReason) {
-    const execution = await this._executeOrder(bot, 'sell', position.amount, position.symbol);
+    const isShort  = position.side === 'short';
+    // Cover short = buy back; close long = sell
+    const execSide = isShort ? 'buy' : 'sell';
+    const execution = await this._executeOrder(bot, execSide, position.amount, position.symbol);
 
-    const realizedPnL = (execution.price - position.entryPrice) * position.amount
-      - position.entryFee
-      - (execution.fee?.cost || 0);
+    const fees = position.entryFee + (execution.fee?.cost || 0);
+    const realizedPnL = isShort
+      ? (position.entryPrice - execution.price) * position.amount - fees
+      : (execution.price - position.entryPrice) * position.amount - fees;
 
     // Create closing trade record
     const trade = await Trade.create({
@@ -142,10 +149,11 @@ class OrderManager {
 
     if (bot.isDemo) {
       return await demoSimulator.executeOrder(bot.userId, {
-        exchange: bot.exchange,
+        exchange:   bot.exchange,
         symbol,
         side,
-        amount
+        amount,
+        marketType: bot.marketType || 'spot',
       });
     }
 
