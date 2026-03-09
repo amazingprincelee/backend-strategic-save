@@ -45,7 +45,10 @@ const CACHE_TTL = {
 
 const FUNDING_CACHE_TTL = 5 * 60_000;
 
-const http = axios.create({ timeout: 15_000 });
+// 5 s for Binance — fast enough to fail over to Gate.io without a long stall.
+// Gate.io and KuCoin get a separate 10 s client (they're reliably accessible).
+const http    = axios.create({ timeout: 5_000 });
+const httpExt = axios.create({ timeout: 10_000 }); // used by Gate.io / KuCoin helpers
 
 // ─── Binance primary ──────────────────────────────────────────────────────────
 
@@ -99,7 +102,7 @@ async function fetchFromGateio(symbol, timeframe, limit, marketType) {
     params = { currency_pair: pair, interval: timeframe, limit };
   }
 
-  const { data } = await http.get(url, { params });
+  const { data } = await httpExt.get(url, { params });
 
   if (!Array.isArray(data) || data.length === 0) {
     throw new Error(`Gate.io returned no candles for ${symbol} ${timeframe}`);
@@ -150,7 +153,7 @@ async function fetchFromKucoin(symbol, timeframe, limit) {
   const tfSec   = { '1min': 60, '5min': 300, '15min': 900, '30min': 1800, '1hour': 3600 };
   const startAt = endAt - (limit * (tfSec[type] ?? 3600)) - 3600; // small buffer
 
-  const { data } = await http.get(KUCOIN_KLINES_URL, {
+  const { data } = await httpExt.get(KUCOIN_KLINES_URL, {
     params: { type, symbol: kcSymbol, startAt, endAt },
   });
 
@@ -182,9 +185,12 @@ async function fetchCandlesWithFallback(symbol, timeframe, limit, marketType) {
     const { data } = await fetchWithFallback(hosts, '/klines', { symbol, interval: timeframe, limit });
     return mapBinanceCandles(data);
   } catch (err) {
-    const code = err.response?.status;
-    if (code !== 403 && code !== 451) throw err; // non-geo error → propagate
-    console.warn(`[MarketData] Binance geo-blocked (${code}), trying Gate.io…`);
+    const code    = err.response?.status;
+    const isGeoBlock = code === 403 || code === 451;
+    const isTimeout  = err.code === 'ECONNABORTED' || err.message?.includes('timeout');
+    // Only fall through to Gate.io for geo-blocks and timeouts — other errors (400, 429 etc) propagate
+    if (!isGeoBlock && !isTimeout) throw err;
+    console.warn(`[MarketData] Binance unreachable (${code || err.code}), trying Gate.io…`);
   }
 
   // 2. Gate.io
@@ -283,13 +289,15 @@ class MarketDataService {
         low24h:             parseFloat(data.lowPrice),
       };
     } catch (err) {
-      const code = err.response?.status;
-      if (code !== 403 && code !== 451) throw err;
+      const code       = err.response?.status;
+      const isGeoBlock = code === 403 || code === 451;
+      const isTimeout  = err.code === 'ECONNABORTED' || err.message?.includes('timeout');
+      if (!isGeoBlock && !isTimeout) throw err;
 
       // Fallback: Gate.io 24h ticker
       try {
         const pair = toGateioSymbol(symbol);
-        const { data } = await http.get(`https://api.gateio.ws/api/v4/spot/tickers`, {
+        const { data } = await httpExt.get(`https://api.gateio.ws/api/v4/spot/tickers`, {
           params: { currency_pair: pair },
         });
         const t = Array.isArray(data) ? data[0] : data;

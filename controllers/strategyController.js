@@ -14,10 +14,10 @@ const STRATEGY_CATALOG = [
     isDefault: true,
     bestFor: ['Signal-based trading', 'Hands-free automation', 'Consistent R:R management'],
     defaultParams: {
-      minConfidencePercent:  70,
-      maxConcurrentTrades:   2,
+      minConfidencePercent:  60,
+      maxConcurrentTrades:   3,
       riskPerTrade:          2,
-      signalMaxAgeMinutes:   20,
+      signalMaxAgeMinutes:   120,
       leverage:              3,
     }
   },
@@ -35,7 +35,7 @@ const STRATEGY_CATALOG = [
       maxScaleIns:          2,
       scaleInAtrMultiplier: 1.5,
       riskPerEntry:         1,
-      minRR:                1.5,
+      minRR:                1.2,
       leverage:             3,
     }
   },
@@ -49,8 +49,8 @@ const STRATEGY_CATALOG = [
     isDefault: false,
     bestFor: ['Long-term accumulation', 'Beginners', 'Passive investing'],
     defaultParams: {
-      dcaIntervalHours:       24,
-      dcaAmountPerOrder:      100,
+      dcaIntervalHours:       4,
+      dcaAmountPerOrder:      25,
       fixedTakeProfitPercent: 2.0,
       stopLossAtrMultiplier:  3.0,
       leverage:               1,

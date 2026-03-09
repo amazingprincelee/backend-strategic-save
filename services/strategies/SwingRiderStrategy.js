@@ -80,7 +80,7 @@ class SwingRiderStrategy {
 
       if (currentPrice <= scaleInLine) {
         const tp = this._calcTP(trend, swingHighs, swingLows, currentPrice, atr);
-        const sl = Math.min(lastSwingLow.price - atr * 0.5, currentPrice - atr * 2);
+        const sl = Math.min(lastSwingLow.price - atr * 0.3, currentPrice - atr * 1.5);
         const rr = (tp - currentPrice) / (currentPrice - sl);
 
         if (tp > currentPrice && rr >= minRR) {
@@ -102,7 +102,8 @@ class SwingRiderStrategy {
     // ── 4. New entry — only when no open longs ───────────────────────────────
     if (openLongs.length >= maxScaleIns) return signals;
 
-    const nearSupport = Math.abs(currentPrice - lastSwingLow.price) <= atr * 0.8;
+    // 1.5× ATR zone around the swing low — wide enough to catch approaches, not just exact touches
+    const nearSupport = Math.abs(currentPrice - lastSwingLow.price) <= atr * 1.5;
     if (!nearSupport) return signals;
 
     let entryReason;
@@ -111,8 +112,8 @@ class SwingRiderStrategy {
     else                       entryReason = 'range_support';
 
     const tp = this._calcTP(trend, swingHighs, swingLows, currentPrice, atr);
-    const sl = lastSwingLow.price - atr * 0.5;
-    const rr = (tp - currentPrice) / (currentPrice - sl);
+    const sl = lastSwingLow.price - atr * 0.3;
+    const rr = (tp - currentPrice) / Math.max(currentPrice - sl, atr * 0.1);
 
     // Gate: price must be above SL, TP above price, R:R acceptable
     if (tp <= currentPrice)    return signals;

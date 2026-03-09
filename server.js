@@ -304,23 +304,16 @@ const startServer = async () => {
       console.warn('⚠️  Bot engine initialization warning:', botEngineError.message);
     }
 
-    // Schedule Technical Analysis Engine background sweep (every 15 min)
-    // 1h candles close once/hour — scanning every 5 min gives the same result 12× in a row.
-    // 15 min is the professional sweet spot: fresh enough, not wasteful on RAM.
-    console.log('📡 Scheduling Technical Analysis sweep (every 15 min, spot + futures)...');
-    cron.schedule('*/15 * * * *', async () => {
+    // Helper: run a full sweep and persist results to DB + emit via socket
+    const runSweep = async () => {
       try {
         console.log('[TAEngine] Background sweep starting (spot + futures)...');
-        // Run sequentially (not parallel) to avoid doubling peak RAM usage.
         const spotSignals    = await sweepTopPairs('1h', 'spot');
         const futuresSignals = await sweepTopPairs('1h', 'futures');
         const allSignals = [...spotSignals, ...futuresSignals];
-        console.log(
-          `[TAEngine] Sweep complete: ${spotSignals.length} spot + ${futuresSignals.length} futures signal(s)`
-        );
+        console.log(`[TAEngine] Sweep complete: ${spotSignals.length} spot + ${futuresSignals.length} futures signal(s)`);
 
         if (allSignals.length > 0 && io) {
-          // Persist all sweep signals to DB
           try {
             await SignalModel.insertMany(
               allSignals.map(s => ({
@@ -344,8 +337,6 @@ const startServer = async () => {
           } catch (dbErr) {
             if (dbErr.code !== 11000) console.warn('[TAEngine] DB persist error:', dbErr.message);
           }
-
-          // Emit each market's signals — frontend routes by signal.marketType
           if (spotSignals.length > 0) {
             io.to('signals:premium').emit('signals:sweep', spotSignals);
             io.to('signals:free').emit('signals:sweep', spotSignals);
@@ -358,7 +349,14 @@ const startServer = async () => {
       } catch (err) {
         console.warn('[TAEngine] Sweep error:', err.message);
       }
-    });
+    };
+
+    // Run once immediately on startup so SmartSignal bots have signals from minute 0
+    setTimeout(runSweep, 5000);
+
+    // Schedule Technical Analysis Engine background sweep (every 15 min)
+    console.log('📡 Scheduling Technical Analysis sweep (every 15 min, spot + futures)...');
+    cron.schedule('*/15 * * * *', runSweep);
     console.log('✅ Technical Analysis sweep scheduled every 15 min (spot + futures)');
 
     // Nightly signal cleanup — delete signals older than 30 days at 2 AM UTC.

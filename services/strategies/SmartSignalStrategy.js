@@ -11,12 +11,14 @@
  *   maxConcurrentTrades   (number, 2)   — max open positions at once
  *   riskPerTrade          (number, 2)   — % of totalCapital per trade
  *   leverage              (number, 3)   — futures leverage (ignored for spot)
- *   signalMaxAgeMinutes   (number, 20)  — reject signals older than this
+ *   signalMaxAgeMinutes   (number, 120) — reject signals older than this (2 h covers restart gaps)
  */
 
 import Signal from '../../models/Signal.js';
 
-const DEFAULT_MAX_AGE_MIN = 20;
+// Sweep runs every 15 min but doesn't fire on startup — use 2 h so there's
+// always valid DB coverage even right after a server restart.
+const DEFAULT_MAX_AGE_MIN = 120;
 
 class SmartSignalStrategy {
   async analyze(bot, _candles, openPositions) {
