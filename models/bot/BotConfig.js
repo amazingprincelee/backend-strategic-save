@@ -40,7 +40,7 @@ const botConfigSchema = new mongoose.Schema({
   strategyId: {
     type: String,
     required: true,
-    enum: ['smart_signal', 'swing_rider', 'dca', 'adaptive_grid', 'rsi_reversal', 'ema_crossover', 'scalper', 'breakout', 'ai_signal']
+    enum: ['smart_signal', 'ai_signal']
   },
   strategyParams: {
     // Adaptive Grid

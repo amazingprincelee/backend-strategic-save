@@ -21,41 +21,6 @@ const STRATEGY_CATALOG = [
       leverage:              3,
     }
   },
-  {
-    id: 'swing_rider',
-    name: 'Swing Rider Bot',
-    description: 'Reads live price structure — swing highs and swing lows — to identify exactly where the market has been bouncing. Enters near support, targets the next resistance, and scales in if price dips further. Adapts automatically to uptrends, downtrends, and ranging markets.',
-    riskLevel: 'medium',
-    timeframe: '15m',
-    supportedMarkets: ['spot', 'futures'],
-    isDefault: false,
-    bestFor: ['Price-action trading', 'Range & trend markets', 'Smart entries with scale-in'],
-    defaultParams: {
-      swingLookback:        5,
-      maxScaleIns:          2,
-      scaleInAtrMultiplier: 1.5,
-      riskPerEntry:         1,
-      minRR:                1.2,
-      leverage:             3,
-    }
-  },
-  {
-    id: 'dca',
-    name: 'Simple DCA',
-    description: 'Buys a fixed dollar amount at regular time intervals regardless of price. Simple, proven, and effective for long-term accumulation on a specific pair. Supports futures with configurable leverage.',
-    riskLevel: 'low',
-    timeframe: '4h',
-    supportedMarkets: ['spot', 'futures'],
-    isDefault: false,
-    bestFor: ['Long-term accumulation', 'Beginners', 'Passive investing'],
-    defaultParams: {
-      dcaIntervalHours:       4,
-      dcaAmountPerOrder:      25,
-      fixedTakeProfitPercent: 2.0,
-      stopLossAtrMultiplier:  3.0,
-      leverage:               1,
-    }
-  },
 ];
 
 export const getStrategyCatalog = (req, res) => {

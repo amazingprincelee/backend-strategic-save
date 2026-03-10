@@ -181,6 +181,43 @@ export const testAccount = async (req, res) => {
 };
 
 /**
+ * GET /api/exchange-accounts/:id/balance
+ * Fetch live balance from the exchange using the stored API key.
+ */
+export const getBalance = async (req, res) => {
+  try {
+    const account = await ExchangeAccount
+      .findOne({ _id: req.params.id, userId: req.user.id })
+      .select('+apiKeyEncrypted +apiSecretEncrypted +apiPassphraseEncrypted');
+
+    if (!account) {
+      return res.status(404).json({ success: false, message: 'Exchange account not found' });
+    }
+    if (!account.isValid) {
+      return res.status(400).json({ success: false, message: 'Exchange account invalid — test the connection first.' });
+    }
+
+    const exchange = await exchangeConnector.getConnection(account);
+    const raw = await exchange.fetchBalance();
+
+    // Return all non-zero balances — USDT first, then alphabetical
+    const balances = Object.entries(raw.total || {})
+      .filter(([, v]) => v > 0)
+      .sort(([a], [b]) => (a === 'USDT' ? -1 : b === 'USDT' ? 1 : a.localeCompare(b)))
+      .map(([currency, total]) => ({
+        currency,
+        total: parseFloat(total.toFixed(8)),
+        free:  parseFloat((raw.free?.[currency] || 0).toFixed(8)),
+        used:  parseFloat((raw.used?.[currency] || 0).toFixed(8)),
+      }));
+
+    res.json({ success: true, data: { balances, fetchedAt: new Date() } });
+  } catch (err) {
+    res.status(500).json({ success: false, message: err.message });
+  }
+};
+
+/**
  * GET /api/exchange-accounts/supported
  * Return popular exchanges list.
  */

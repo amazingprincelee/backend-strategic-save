@@ -10,6 +10,9 @@ import {
   getSystemHealth,
   getAuditLogs
 } from '../controllers/adminController.js';
+import { adminActivatePremium } from '../controllers/paymentController.js';
+import Subscription from '../models/Subscription.js';
+import AppSettings, { getSettings } from '../models/AppSettings.js';
 import {
   authenticate,
   requireAdmin
@@ -260,5 +263,65 @@ router.get('/audit-logs',
   }),
   getAuditLogs
 );
+
+// ── Payment provider + AppSettings ───────────────────────────────────────────
+
+router.get('/settings', adminLimiter, async (req, res) => {
+  try {
+    const settings = await getSettings();
+    res.json({ success: true, data: settings });
+  } catch (e) {
+    res.status(500).json({ success: false, message: e.message });
+  }
+});
+
+router.put('/settings', adminActionLimiter, async (req, res) => {
+  try {
+    const allowed = [
+      'activePaymentProvider', 'premiumPriceUSD', 'premiumDurationDays',
+      'referralRewardUSD', 'freeSignalsPerDay', 'freeSignalMaxConfidence',
+      'freeArbitrageLimit', 'freeArbitrageMaxProfit', 'maintenanceMode',
+    ];
+    const update = {};
+    for (const key of allowed) {
+      if (req.body[key] !== undefined) update[key] = req.body[key];
+    }
+    const doc = await AppSettings.findOneAndUpdate(
+      { key: 'global' },
+      { $set: update },
+      { new: true, upsert: true }
+    );
+    res.json({ success: true, data: doc });
+  } catch (e) {
+    res.status(500).json({ success: false, message: e.message });
+  }
+});
+
+// ── Subscription history ──────────────────────────────────────────────────────
+
+router.get('/subscriptions', adminLimiter, async (req, res) => {
+  try {
+    const { limit = 50, skip = 0, status, provider } = req.query;
+    const filter = {};
+    if (status) filter.status = status;
+    if (provider) filter.provider = provider;
+
+    const [subs, total] = await Promise.all([
+      Subscription.find(filter)
+        .sort({ createdAt: -1 })
+        .skip(parseInt(skip))
+        .limit(Math.min(parseInt(limit), 200))
+        .lean(),
+      Subscription.countDocuments(filter),
+    ]);
+    res.json({ success: true, data: subs, meta: { total, limit: parseInt(limit), skip: parseInt(skip) } });
+  } catch (e) {
+    res.status(500).json({ success: false, message: e.message });
+  }
+});
+
+// ── Manual premium activation ────────────────────────────────────────────────
+
+router.post('/activate-premium', adminActionLimiter, adminActivatePremium);
 
 export default router;

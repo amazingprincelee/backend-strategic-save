@@ -6,7 +6,9 @@ import {
   refreshToken,
   getProfile,
   updateProfile,
-  logout
+  logout,
+  googleAuth,
+  googleCallback,
 } from '../controllers/authController.js';
 import {
   authenticate
@@ -103,5 +105,10 @@ router.post('/logout',
   authenticate,
   logout
 );
+
+// ── Google OAuth ──────────────────────────────────────────────────────────────
+// No rate limiter here — Google itself rate-limits the OAuth consent screen
+router.get('/google',          googleAuth);
+router.get('/google/callback', googleCallback);
 
 export default router;

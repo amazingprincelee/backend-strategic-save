@@ -15,7 +15,7 @@
  */
 
 import express from 'express';
-import { authenticate as protect } from '../middleware/auth.js';
+import { authenticate as protect, optionalAuth, requirePremium } from '../middleware/auth.js';
 import {
   getSignals,
   getStats,
@@ -29,16 +29,16 @@ import {
 
 const router = express.Router();
 
-// ── Public endpoints ───────────────────────────────────────────────────────────
-router.get('/',       getSignals);   // ?type=spot|futures
+// ── Public endpoints (optional auth for gating) ────────────────────────────────
+router.get('/',       optionalAuth, getSignals);   // ?type=spot|futures  — gated for free users
 router.get('/stats',  getStats);
-router.get('/pairs',              getAvailablePairs);    // ?market=spot|futures — cached 1 h
-router.get('/exchange-pairs',     getExchangePairs);     // ?exchange=okx&market=spot|futures — from DB
-router.get('/all-exchange-pairs', getAllExchangePairs);  // all exchanges in one call — for Redux preload
+router.get('/pairs',              getAvailablePairs);
+router.get('/exchange-pairs',     getExchangePairs);
+router.get('/all-exchange-pairs', getAllExchangePairs);
 
 // ── Authenticated endpoints ────────────────────────────────────────────────────
-router.get('/history',    protect, getSignalHistory);
-router.post('/backtest',  protect, runBacktest);
-router.post('/analyze',   protect, analyzeSignal);
+router.get('/history',    protect, getSignalHistory);          // gated in controller
+router.post('/backtest',  protect, requirePremium, runBacktest);  // premium only
+router.post('/analyze',   protect, requirePremium, analyzeSignal); // premium only
 
 export default router;

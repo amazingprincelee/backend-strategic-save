@@ -1,4 +1,5 @@
 import express from 'express';
+import { optionalAuth } from '../middleware/auth.js';
 import {
   fetchExchanges,
   getArbitrageOpportunities,
@@ -15,8 +16,8 @@ const router = express.Router();
 // Get all available exchanges from CCXT
 router.get('/fetch-exchanges', fetchExchanges);
 
-// Get cached arbitrage opportunities (recommended endpoint)
-router.get('/fetch-opportunity', getArbitrageOpportunities);
+// Get cached arbitrage opportunities — optionalAuth so free-tier limits apply
+router.get('/fetch-opportunity', optionalAuth, getArbitrageOpportunities);
 
 // Get stored significant opportunities (≥0.20% net profit) — history + monitoring
 // ?status=all|active|cleared  &limit=100

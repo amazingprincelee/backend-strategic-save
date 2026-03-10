@@ -21,6 +21,19 @@ export const fetchExchanges = async (req, res) => {
   }
 }
 
+// ─── Free-tier gating ────────────────────────────────────────────────────────
+function isPremiumUser(req) {
+  const u = req.user;
+  if (!u) return false;
+  if (u.role === 'admin') return true;
+  if (u.role === 'premium') {
+    const expiry = u.subscription?.expiresAt;
+    if (!expiry) return true;
+    return new Date() < new Date(expiry);
+  }
+  return false;
+}
+
 // Get arbitrage opportunities from cache
 export const getArbitrageOpportunities = async (req, res) => {
   try {
@@ -68,12 +81,22 @@ export const getArbitrageOpportunities = async (req, res) => {
       }
     }
 
+    // ── Free-tier gating ─────────────────────────────────────────────────────
+    const premium = isPremiumUser(req);
+    if (!premium) {
+      // Free: only show opportunities with netProfitPercent < 1%
+      opportunities = opportunities.filter(o => (o.netProfitPercent ?? 0) < 1);
+      // Limit to 5 results
+      opportunities = opportunities.slice(0, 5);
+    }
+
     // Return data (live or stale)
     res.json({
       success: true,
       count: opportunities.length,
       data: opportunities,
       isStale,
+      gated: !premium,
       metadata: {
         lastUpdate: cacheData.lastUpdate,
         nextUpdate: cacheData.nextUpdate,

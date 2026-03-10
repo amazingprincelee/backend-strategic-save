@@ -11,6 +11,30 @@ import BotConfig         from '../models/bot/BotConfig.js';
 import { analyzeSymbol } from '../services/TechnicalAnalysisEngine.js';
 import ExchangePairs     from '../models/ExchangePairs.js';
 
+// ─── Free-tier gating helpers ─────────────────────────────────────────────────
+
+function isPremiumUser(req) {
+  const u = req.user;
+  if (!u) return false;
+  if (u.role === 'admin') return true;
+  if (u.role === 'premium') {
+    const expiry = u.subscription?.expiresAt;
+    if (!expiry) return true;                        // manual/lifetime grant
+    return new Date() < new Date(expiry);
+  }
+  return false;
+}
+
+function maskSignal(sig) {
+  return {
+    ...sig,
+    entry:      null,
+    stopLoss:   null,
+    takeProfit: null,
+    _gated:     true,
+  };
+}
+
 // ─── Pair list cache (refreshed every 60 min) ────────────────────────────────
 let _pairsCache = { spot: [], futures: [], fetchedAt: 0 };
 const PAIRS_TTL = 60 * 60 * 1000; // 1 hour
@@ -126,6 +150,17 @@ export const getSignals = async (req, res) => {
       fromDB = true;
     }
 
+    // ── Free-tier gating ─────────────────────────────────────────────────────
+    const premium = isPremiumUser(req);
+    if (!premium) {
+      // Keep only signals with confidenceScore < 0.60
+      signals = signals.filter(s => (s.confidenceScore ?? 1) < 0.60);
+      // Limit to 2 signals
+      signals = signals.slice(0, 2);
+      // Mask sensitive fields
+      signals = signals.map(maskSignal);
+    }
+
     return res.json({
       success: true,
       data:    signals,
@@ -136,6 +171,7 @@ export const getSignals = async (req, res) => {
         aiPowered:  true,
         fromDB,
         updatedAt:  new Date().toISOString(),
+        gated:      !premium,
       },
     });
   } catch (err) {
@@ -168,6 +204,8 @@ export const getStats = async (req, res) => {
 
 export const getSignalHistory = async (req, res) => {
   try {
+    const premium = isPremiumUser(req);
+
     const {
       marketType,
       type,
@@ -182,24 +220,36 @@ export const getSignalHistory = async (req, res) => {
     if (type)       filter.type = type.toUpperCase();
     if (minConfidence > 0) filter.confidenceScore = { $gte: parseFloat(minConfidence) };
 
+    // Free users: cap confidence at <0.60 and limit to 2 results from today
+    if (!premium) {
+      filter.confidenceScore = { $lt: 0.60 };
+      const startOfDay = new Date();
+      startOfDay.setHours(0, 0, 0, 0);
+      filter.timestamp = { $gte: startOfDay };
+    }
+
     const sortOrder = sort === 'confidence'
       ? { confidenceScore: -1, timestamp: -1 }
       : { timestamp: -1 };
+
+    const effectiveLimit = premium ? Math.min(parseInt(limit), 200) : 2;
 
     const [signals, total] = await Promise.all([
       SignalModel
         .find(filter)
         .sort(sortOrder)
-        .skip(parseInt(skip))
-        .limit(Math.min(parseInt(limit), 200))
+        .skip(premium ? parseInt(skip) : 0)
+        .limit(effectiveLimit)
         .lean(),
       SignalModel.countDocuments(filter),
     ]);
 
+    const result = premium ? signals : signals.map(maskSignal);
+
     return res.json({
       success: true,
-      data:    signals,
-      meta:    { total, limit: parseInt(limit), skip: parseInt(skip) },
+      data:    result,
+      meta:    { total, limit: effectiveLimit, skip: premium ? parseInt(skip) : 0, gated: !premium },
     });
   } catch (err) {
     console.error('[SignalController] getSignalHistory error:', err.message);

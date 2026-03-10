@@ -68,8 +68,25 @@ export const requireAdmin = (req, res, next) => {
       message: 'Admin access required'
     });
   }
-  
+
   next();
+};
+
+// Middleware to check if user has an active premium subscription
+export const requirePremium = (req, res, next) => {
+  const u = req.user;
+  if (u.role === 'admin') return next();
+  if (u.role === 'premium') {
+    // Also check subscription hasn't expired
+    const expiry = u.subscription?.expiresAt;
+    if (expiry && new Date() < new Date(expiry)) return next();
+    if (u.role === 'premium' && !expiry) return next(); // manual admin grant with no expiry
+  }
+  return res.status(403).json({
+    success: false,
+    message: 'Premium subscription required',
+    code: 'PREMIUM_REQUIRED',
+  });
 };
 
 // Middleware to check wallet ownership

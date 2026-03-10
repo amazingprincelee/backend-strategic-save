@@ -14,5 +14,6 @@ router.post('/', ctrl.addAccount);
 router.put('/:id', ctrl.updateAccount);
 router.delete('/:id', ctrl.deleteAccount);
 router.post('/:id/test', ctrl.testAccount);
+router.get('/:id/balance', ctrl.getBalance);
 
 export default router;

@@ -25,6 +25,7 @@ import exchangeAccountRoutes from './routes/exchangeAccounts.js';
 import demoRoutes         from './routes/demo.js';
 import strategyRoutes     from './routes/strategies.js';
 import signalRoutes       from './routes/signals.js';
+import paymentRoutes      from './routes/payments.js';
 
 // Import services
 import emailService from './utils/emailService.js';
@@ -44,6 +45,8 @@ import { sweepTopPairs } from './services/TechnicalAnalysisEngine.js';
 import SignalModel from './models/Signal.js';
 // Exchange pairs preloader (DB-backed, monthly refresh)
 import { refreshStaleExchangePairs } from './controllers/signalController.js';
+// User model for subscription reminder cron
+import User from './models/User.js';
 
 // Load environment variables
 dotenv.config();
@@ -110,6 +113,23 @@ io.on('connection', (socket) => {
 // Rate limiting
 app.use(generalLimiter);
 
+// Raw body capture for payment webhooks (must come BEFORE express.json())
+// Webhook signature verification requires the raw request body.
+app.use((req, res, next) => {
+  if (req.path.startsWith('/api/payments/webhook/')) {
+    let data = '';
+    req.setEncoding('utf8');
+    req.on('data', chunk => { data += chunk; });
+    req.on('end', () => {
+      req.rawBody = data;
+      try { req.body = JSON.parse(data); } catch { req.body = {}; }
+      next();
+    });
+  } else {
+    next();
+  }
+});
+
 // Body parsing middleware
 app.use(express.json());
 
@@ -142,6 +162,7 @@ app.use('/api/exchange-accounts',exchangeAccountRoutes);
 app.use('/api/demo',             demoRoutes);
 app.use('/api/strategies',       strategyRoutes);
 app.use('/api/signals',          signalRoutes);
+app.use('/api/payments',         paymentRoutes);
 
 // Root endpoint
 app.get('/', (req, res) => {
@@ -256,6 +277,20 @@ const startServer = async () => {
     // Initialize Bot Trading Engine
     console.log('🤖 Initializing Bot Trading Engine...');
     botEngine.setIO(io);
+
+    // ── One-time migration: remove all non-SmartSignal bots ──────────────────
+    // SmartSignal (smart_signal / ai_signal alias) is the only supported strategy.
+    // Any bot left over from the old multi-strategy era is deleted here.
+    try {
+      const removed = await BotConfig.deleteMany({
+        strategyId: { $nin: ['smart_signal', 'ai_signal'] }
+      });
+      if (removed.deletedCount > 0) {
+        console.log(`🗑️  Migration: removed ${removed.deletedCount} legacy bot(s) (non-SmartSignal strategy)`);
+      }
+    } catch (migErr) {
+      console.warn('⚠️  Migration warning (non-SmartSignal bot cleanup):', migErr.message);
+    }
 
     // Pause LIVE bots using geo-blocked exchanges before trying to resume them.
     // Demo bots are exempt — they fetch OHLCV via MarketDataService (Gate.io fallback)
@@ -373,6 +408,65 @@ const startServer = async () => {
       }
     });
     console.log('✅ Nightly signal cleanup scheduled (30-day retention, runs at 2 AM UTC)');
+
+    // Subscription expiry reminder cron — runs daily at 9 AM UTC.
+    // Sends email 7 days and 1 day before expiry; flags prevent duplicate sends.
+    cron.schedule('0 9 * * *', async () => {
+      try {
+        const now    = new Date();
+        const in7d   = new Date(now.getTime() + 7  * 24 * 60 * 60 * 1000);
+        const in1d   = new Date(now.getTime() + 1  * 24 * 60 * 60 * 1000);
+        const passed = new Date(now.getTime() - 15 * 60 * 1000); // 15-min buffer
+
+        // 7-day reminder
+        const remind7 = await User.find({
+          'subscription.status':           'active',
+          'subscription.plan':             'premium',
+          'subscription.expiresAt':        { $gte: passed, $lte: in7d },
+          'subscription.autoReminderSent7d': false,
+        });
+        for (const u of remind7) {
+          try {
+            await emailService.sendEmail({
+              to: u.email,
+              subject: 'Your SmartStrategy Premium expires in 7 days',
+              html: `<p>Hi${u.fullName ? ' ' + u.fullName : ''},</p>
+                     <p>Your premium subscription expires on <strong>${new Date(u.subscription.expiresAt).toDateString()}</strong>.</p>
+                     <p>Renew now to keep uninterrupted access to all signals, arbitrage opportunities, and bots.</p>
+                     <p><a href="${process.env.CLIENT_URL}/pricing">Renew Premium →</a></p>`,
+            });
+            await User.findByIdAndUpdate(u._id, { 'subscription.autoReminderSent7d': true });
+          } catch (e) { console.warn(`[Reminder] 7d email failed for ${u.email}:`, e.message); }
+        }
+
+        // 1-day reminder
+        const remind1 = await User.find({
+          'subscription.status':           'active',
+          'subscription.plan':             'premium',
+          'subscription.expiresAt':        { $gte: passed, $lte: in1d },
+          'subscription.autoReminderSent1d': false,
+        });
+        for (const u of remind1) {
+          try {
+            await emailService.sendEmail({
+              to: u.email,
+              subject: 'Last chance — Premium expires tomorrow!',
+              html: `<p>Hi${u.fullName ? ' ' + u.fullName : ''},</p>
+                     <p>Your premium subscription expires <strong>tomorrow (${new Date(u.subscription.expiresAt).toDateString()})</strong>.</p>
+                     <p><a href="${process.env.CLIENT_URL}/pricing">Renew now →</a></p>`,
+            });
+            await User.findByIdAndUpdate(u._id, { 'subscription.autoReminderSent1d': true });
+          } catch (e) { console.warn(`[Reminder] 1d email failed for ${u.email}:`, e.message); }
+        }
+
+        if (remind7.length + remind1.length > 0) {
+          console.log(`[Reminder] Sent ${remind7.length} × 7-day, ${remind1.length} × 1-day renewal reminders`);
+        }
+      } catch (err) {
+        console.warn('[Reminder] Cron error:', err.message);
+      }
+    });
+    console.log('✅ Subscription expiry reminder cron scheduled (daily 9 AM UTC)');
 
     // Exchange pairs preload — refresh stale (>30 days) records in background at startup.
     // Does NOT block server startup; each exchange logs when done.

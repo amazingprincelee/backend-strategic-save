@@ -7,11 +7,118 @@ import {
   profileUpdateSchema
 } from '../utils/validation.js';
 
+// ─── Google OAuth helpers ─────────────────────────────────────────────────────
+
+const GOOGLE_AUTH_URL  = 'https://accounts.google.com/o/oauth2/v2/auth';
+const GOOGLE_TOKEN_URL = 'https://oauth2.googleapis.com/token';
+const GOOGLE_USER_URL  = 'https://www.googleapis.com/oauth2/v3/userinfo';
+
+function buildGoogleRedirectUri() {
+  // Use the backend URL for the callback — Google calls this server-side
+  const base = process.env.API_URL || `http://localhost:${process.env.PORT || 5000}`;
+  return `${base}/api/auth/google/callback`;
+}
+
+// GET /api/auth/google — redirect user to Google consent screen
+export const googleAuth = (req, res) => {
+  const params = new URLSearchParams({
+    client_id:     process.env.GOOGLE_CLIENT_ID,
+    redirect_uri:  buildGoogleRedirectUri(),
+    response_type: 'code',
+    scope:         'openid email profile',
+    access_type:   'online',
+    prompt:        'select_account',
+  });
+  res.redirect(`${GOOGLE_AUTH_URL}?${params}`);
+};
+
+// GET /api/auth/google/callback — Google redirects here with ?code=
+export const googleCallback = async (req, res) => {
+  const clientUrl = process.env.CLIENT_URL || 'http://localhost:5173';
+  try {
+    const { code } = req.query;
+    if (!code) throw new Error('No code from Google');
+
+    // Exchange code for tokens
+    const tokenRes = await fetch(GOOGLE_TOKEN_URL, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+      body: new URLSearchParams({
+        code,
+        client_id:     process.env.GOOGLE_CLIENT_ID,
+        client_secret: process.env.GOOGLE_CLIENT_SECRET,
+        redirect_uri:  buildGoogleRedirectUri(),
+        grant_type:    'authorization_code',
+      }),
+    });
+    const tokenData = await tokenRes.json();
+    if (!tokenData.access_token) throw new Error('Token exchange failed');
+
+    // Fetch user info from Google
+    const userRes  = await fetch(GOOGLE_USER_URL, {
+      headers: { Authorization: `Bearer ${tokenData.access_token}` },
+    });
+    const googleUser = await userRes.json();
+    if (!googleUser.email) throw new Error('Could not get email from Google');
+
+    // Find existing user by googleId or email
+    let user = await User.findOne({
+      $or: [
+        { googleId: googleUser.sub },
+        { email: googleUser.email.toLowerCase() },
+      ],
+    });
+
+    if (user) {
+      // Link Google ID if not already set
+      if (!user.googleId) {
+        user.googleId     = googleUser.sub;
+        user.authProvider = 'google';
+        await user.save();
+      }
+    } else {
+      // Create new user from Google profile
+      user = new User({
+        email:        googleUser.email.toLowerCase(),
+        fullName:     googleUser.name || '',
+        googleId:     googleUser.sub,
+        authProvider: 'google',
+        role:         'user',
+        // Password field is required by schema but Google users don't use it
+        // Set a long random string they can never guess
+        password:     await bcrypt.hash(googleUser.sub + process.env.JWT_SECRET, 10),
+      });
+      await user.save();
+    }
+
+    user.lastLogin = new Date();
+    await user.save();
+
+    // Issue our JWT
+    const accessToken  = generateAccessToken(user);
+    const refreshToken = generateRefreshToken(user);
+
+    // Redirect to frontend callback page with tokens in query params
+    const params = new URLSearchParams({
+      token:        accessToken,
+      refreshToken,
+      userId:       user._id.toString(),
+      email:        user.email,
+      role:         user.role,
+      fullName:     user.fullName || '',
+    });
+    res.redirect(`${clientUrl}/auth/callback?${params}`);
+  } catch (err) {
+    console.error('[Google OAuth] Callback error:', err.message);
+    res.redirect(`${clientUrl}/login?error=google_auth_failed`);
+  }
+};
+
 // Register new user
 export const register = async (req, res) => {
  
   try {
-    const { email, password, fullName} = req.body;
+    const { email, password, fullName, referralCode } = req.body;
 
     // Check if user already exists by email
     const existingUserByEmail = await User.findOne({ email: email.toLowerCase() });
@@ -28,20 +135,34 @@ export const register = async (req, res) => {
     const hashedPassword = await bcrypt.hash(password, saltRounds);
 
 
+    // Validate referral code (if provided)
+    let referredBy = null;
+    if (referralCode) {
+      const referrer = await User.findOne({ 'referral.code': referralCode.toUpperCase().trim() });
+      if (referrer) referredBy = referralCode.toUpperCase().trim();
+    }
+
     // Create new user
     const userObj = {
       email: email.toLowerCase(),
       password: hashedPassword,
-      profile: {
-        fullName,
-      },
-      role: 'user'
+      fullName,
+      role: 'user',
+      ...(referredBy ? { referral: { referredBy } } : {}),
     };
 
 
     const user = new User(userObj);
 
     await user.save();
+
+    // If referred, add this user to the referrer's referral list
+    if (referredBy) {
+      await User.findOneAndUpdate(
+        { 'referral.code': referredBy },
+        { $push: { 'referral.referrals': user._id } }
+      );
+    }
 
     // Generate JWT tokens
     const accessToken = generateAccessToken(user);

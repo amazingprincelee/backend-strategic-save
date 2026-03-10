@@ -97,7 +97,7 @@ class OrderManager {
       positionId: position._id,
       isDemo: bot.isDemo,
       exchange: bot.exchange,
-      symbol: bot.symbol,
+      symbol: position.symbol,   // use actual traded pair (bot.symbol may be 'MULTI')
       side: 'sell',
       type: 'market',
       price: execution.price,
@@ -173,7 +173,15 @@ class OrderManager {
       exchange.options = { ...exchange.options, defaultType: 'future' };
     }
 
-    const order = await exchange.createMarketOrder(symbol, side, amount);
+    // Resolve CCXT market symbol: after loadMarkets(), markets are keyed as 'BTC/USDT'.
+    // SmartSignal stores pairs as 'BTCUSDT' (no slash) — look up the canonical symbol.
+    const market = exchange.marketsById?.[symbol] || exchange.markets?.[symbol];
+    const ccxtSymbol = market?.symbol || symbol;
+
+    // CCXT only accepts 'buy' or 'sell' — map futures-short entry 'short' → 'sell'
+    const ccxtSide = side === 'short' ? 'sell' : side;
+
+    const order = await exchange.createMarketOrder(ccxtSymbol, ccxtSide, amount);
 
     return {
       price: order.average || order.price || order.fills?.[0]?.price,
