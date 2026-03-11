@@ -8,8 +8,6 @@ import {
   sendBroadcastNotification,
   sendBroadcastEmail,
   getSystemHealth,
-  getAuditLogs,
-  // New exports
   grantFreeTrial,
   getRevenueAnalytics,
   getUserAnalytics,
@@ -22,263 +20,58 @@ import {
 import { adminActivatePremium } from '../controllers/paymentController.js';
 import Subscription from '../models/Subscription.js';
 import AppSettings, { getSettings } from '../models/AppSettings.js';
-import {
-  authenticate,
-  requireAdmin
-} from '../middleware/auth.js';
-import {
-  validateQuery,
-  validateParams,
-  validateRequest,
-  paginationSchema,
-  adminUserUpdateSchema
-} from '../utils/validation.js';
+import { authenticate, requireAdmin } from '../middleware/auth.js';
 
 const router = express.Router();
 
-// Rate limiting for admin endpoints
 const adminLimiter = rateLimit({
-  windowMs: 1 * 60 * 1000, // 1 minute
-  max: 30, // limit each IP to 30 requests per minute
-  message: {
-    success: false,
-    message: 'Too many admin requests, please try again later'
-  },
-  standardHeaders: true,
-  legacyHeaders: false
+  windowMs: 1 * 60 * 1000,
+  max: 60,
+  message: { success: false, message: 'Too many admin requests, please try again later' },
+  standardHeaders: true, legacyHeaders: false
 });
 
 const adminActionLimiter = rateLimit({
-  windowMs: 5 * 60 * 1000, // 5 minutes
-  max: 10, // limit each IP to 10 actions per 5 minutes
-  message: {
-    success: false,
-    message: 'Too many admin actions, please try again later'
-  },
-  standardHeaders: true,
-  legacyHeaders: false
+  windowMs: 5 * 60 * 1000,
+  max: 20,
+  message: { success: false, message: 'Too many admin actions, please try again later' },
+  standardHeaders: true, legacyHeaders: false
 });
 
 const broadcastLimiter = rateLimit({
-  windowMs: 60 * 60 * 1000, // 1 hour
-  max: 5, // limit each IP to 5 broadcasts per hour
-  message: {
-    success: false,
-    message: 'Too many broadcast attempts, please try again later'
-  },
-  standardHeaders: true,
-  legacyHeaders: false
+  windowMs: 60 * 60 * 1000,
+  max: 10,
+  message: { success: false, message: 'Too many broadcast attempts, please try again later' },
+  standardHeaders: true, legacyHeaders: false
 });
 
-// ── Public routes (must come BEFORE the admin auth middleware) ────────────────
-// Active announcement — readable by any logged-in user for the banner
+// ── Public routes (BEFORE auth middleware) ───────────────────────────────────
 router.get('/announcement/active', getActiveAnnouncement);
 
-// All other admin routes require authentication and admin role
+// ── All routes below require admin auth ───────────────────────────────────────
 router.use(authenticate);
 router.use(requireAdmin);
 
-/**
- * @route   GET /api/admin/stats
- * @desc    Get platform statistics
- * @access  Private (Admin only)
- */
-router.get('/stats', 
-  adminLimiter,
-  getPlatformStats
-);
+// Stats
+router.get('/stats',          adminLimiter,       getPlatformStats);
 
-/**
- * @route   GET /api/admin/users
- * @desc    Get all users with pagination and search
- * @access  Private (Admin only)
- */
-router.get('/users', 
-  adminLimiter,
-  validateQuery({
-    ...paginationSchema.fields,
-    search: {
-      type: 'string',
-      required: false,
-      min: 1,
-      max: 100
-    },
-    role: {
-      type: 'string',
-      required: false,
-      oneOf: ['user', 'admin']
-    },
-    isEmailVerified: {
-      type: 'string',
-      required: false,
-      oneOf: ['true', 'false']
-    }
-  }),
-  getAllUsers
-);
+// Users — no validateQuery middleware; controller handles params directly
+router.get('/users',          adminLimiter,       getAllUsers);
+router.put('/users/:userId',  adminActionLimiter, updateUser);
+router.delete('/users/:userId', adminActionLimiter, deleteUser);
 
-/**
- * @route   PUT /api/admin/users/:userId
- * @desc    Update user
- * @access  Private (Admin only)
- */
-router.put('/users/:userId', 
-  adminActionLimiter,
-  validateParams({
-    userId: {
-      type: 'string',
-      required: true,
-      matches: /^[0-9a-fA-F]{24}$/,
-      message: 'Invalid user ID'
-    }
-  }),
-  validateRequest(adminUserUpdateSchema),
-  updateUser
-);
+// Broadcast
+router.post('/broadcast/notification',    broadcastLimiter, sendBroadcastNotification);
+router.post('/broadcast/email',           broadcastLimiter, sendBroadcastEmail);
+router.post('/broadcast/targeted-email',  broadcastLimiter, sendTargetedEmail);
 
-/**
- * @route   DELETE /api/admin/users/:userId
- * @desc    Delete user
- * @access  Private (Admin only)
- */
-router.delete('/users/:userId', 
-  adminActionLimiter,
-  validateParams({
-    userId: {
-      type: 'string',
-      required: true,
-      matches: /^[0-9a-fA-F]{24}$/,
-      message: 'Invalid user ID'
-    }
-  }),
-  deleteUser
-);
+// Health
+router.get('/health', adminLimiter, getSystemHealth);
 
-/**
- * @route   POST /api/admin/broadcast/notification
- * @desc    Send broadcast notification to all users
- * @access  Private (Admin only)
- */
-router.post('/broadcast/notification', 
-  broadcastLimiter,
-  validateRequest({
-    title: {
-      type: 'string',
-      required: true,
-      min: 1,
-      max: 200
-    },
-    message: {
-      type: 'string',
-      required: true,
-      min: 1,
-      max: 1000
-    },
-    type: {
-      type: 'string',
-      required: false,
-      oneOf: [
-        'vault_created',
-        'deposit_confirmed',
-        'withdrawal_confirmed',
-        'vault_matured',
-        'vault_unlocked',
-        'platform_fee_updated',
-        'system_maintenance',
-        'security_alert',
-        'announcement'
-      ],
-      default: 'announcement'
-    },
-    priority: {
-      type: 'string',
-      required: false,
-      oneOf: ['low', 'medium', 'high'],
-      default: 'medium'
-    }
-  }),
-  sendBroadcastNotification
-);
+// Audit log (new real one)
+router.get('/audit', adminLimiter, getRealAuditLogs);
 
-/**
- * @route   POST /api/admin/broadcast/email
- * @desc    Send broadcast email to all users
- * @access  Private (Admin only)
- */
-router.post('/broadcast/email', 
-  broadcastLimiter,
-  validateRequest({
-    subject: {
-      type: 'string',
-      required: true,
-      min: 1,
-      max: 200
-    },
-    htmlContent: {
-      type: 'string',
-      required: false,
-      min: 1,
-      max: 10000
-    },
-    textContent: {
-      type: 'string',
-      required: false,
-      min: 1,
-      max: 10000
-    }
-  }),
-  sendBroadcastEmail
-);
-
-/**
- * @route   GET /api/admin/health
- * @desc    Get system health status
- * @access  Private (Admin only)
- */
-router.get('/health', 
-  adminLimiter,
-  getSystemHealth
-);
-
-/**
- * @route   GET /api/admin/audit-logs
- * @desc    Get audit logs
- * @access  Private (Admin only)
- */
-router.get('/audit-logs', 
-  adminLimiter,
-  validateQuery({
-    ...paginationSchema.fields,
-    action: {
-      type: 'string',
-      required: false,
-      min: 1,
-      max: 50
-    },
-    userId: {
-      type: 'string',
-      required: false,
-      matches: /^[0-9a-fA-F]{24}$/,
-      message: 'Invalid user ID'
-    },
-    startDate: {
-      type: 'string',
-      required: false,
-      matches: /^\d{4}-\d{2}-\d{2}$/,
-      message: 'Invalid date format (YYYY-MM-DD)'
-    },
-    endDate: {
-      type: 'string',
-      required: false,
-      matches: /^\d{4}-\d{2}-\d{2}$/,
-      message: 'Invalid date format (YYYY-MM-DD)'
-    }
-  }),
-  getAuditLogs
-);
-
-// ── Payment provider + AppSettings ───────────────────────────────────────────
-
+// Settings
 router.get('/settings', adminLimiter, async (req, res) => {
   try {
     const settings = await getSettings();
@@ -294,6 +87,7 @@ router.put('/settings', adminActionLimiter, async (req, res) => {
       'activePaymentProvider', 'premiumPriceUSD', 'premiumDurationDays',
       'referralRewardUSD', 'freeSignalsPerDay', 'freeSignalMaxConfidence',
       'freeArbitrageLimit', 'freeArbitrageMaxProfit', 'maintenanceMode',
+      'freeTrialDays', 'minWithdrawalAmount',
     ];
     const update = {};
     for (const key of allowed) {
@@ -301,7 +95,7 @@ router.put('/settings', adminActionLimiter, async (req, res) => {
     }
     const doc = await AppSettings.findOneAndUpdate(
       { key: 'global' },
-      { $set: update },
+      { $set: { ...update, updatedBy: req.user._id } },
       { new: true, upsert: true }
     );
     res.json({ success: true, data: doc });
@@ -310,47 +104,35 @@ router.put('/settings', adminActionLimiter, async (req, res) => {
   }
 });
 
-// ── Subscription history ──────────────────────────────────────────────────────
-
+// Subscriptions
 router.get('/subscriptions', adminLimiter, async (req, res) => {
   try {
-    const { limit = 50, skip = 0, status, provider } = req.query;
-    const filter = {};
-    if (status) filter.status = status;
-    if (provider) filter.provider = provider;
+    const limit    = Math.min(parseInt(req.query.limit) || 50, 200);
+    const skip     = parseInt(req.query.skip) || 0;
+    const filter   = {};
+    if (req.query.status)   filter.status   = req.query.status;
+    if (req.query.provider) filter.provider = req.query.provider;
 
     const [subs, total] = await Promise.all([
-      Subscription.find(filter)
-        .sort({ createdAt: -1 })
-        .skip(parseInt(skip))
-        .limit(Math.min(parseInt(limit), 200))
-        .lean(),
+      Subscription.find(filter).sort({ createdAt: -1 }).skip(skip).limit(limit).lean(),
       Subscription.countDocuments(filter),
     ]);
-    res.json({ success: true, data: subs, meta: { total, limit: parseInt(limit), skip: parseInt(skip) } });
+    res.json({ success: true, data: subs, meta: { total, limit, skip } });
   } catch (e) {
     res.status(500).json({ success: false, message: e.message });
   }
 });
 
-// ── Manual premium activation ────────────────────────────────────────────────
+// Premium activation / free trial
 router.post('/activate-premium', adminActionLimiter, adminActivatePremium);
+router.post('/grant-trial',      adminActionLimiter, grantFreeTrial);
 
-// ── Free trial grant ──────────────────────────────────────────────────────────
-router.post('/grant-trial', adminActionLimiter, grantFreeTrial);
-
-// ── Analytics ─────────────────────────────────────────────────────────────────
+// Analytics
 router.get('/analytics/revenue',  adminLimiter, getRevenueAnalytics);
 router.get('/analytics/users',    adminLimiter, getUserAnalytics);
 router.get('/analytics/platform', adminLimiter, getPlatformAnalytics);
 
-// ── Real audit log ─────────────────────────────────────────────────────────────
-router.get('/audit', adminLimiter, getRealAuditLogs);
-
-// ── Targeted email campaign ────────────────────────────────────────────────────
-router.post('/broadcast/targeted-email', broadcastLimiter, sendTargetedEmail);
-
-// ── Announcement banner ────────────────────────────────────────────────────────
+// Announcement
 router.put('/announcement', adminActionLimiter, updateAnnouncement);
 
 export default router;

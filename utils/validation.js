@@ -235,7 +235,7 @@ export const adminUserUpdateSchema = yup.object({
   email: emailSchema.optional(),
   role: yup
     .string()
-    .oneOf(['user', 'admin'], 'Role must be either user or admin')
+    .oneOf(['user', 'premium', 'admin'], 'Role must be user, premium or admin')
     .optional(),
   isActive: yup.boolean().optional(),
   walletAddress: yup

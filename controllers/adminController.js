@@ -106,25 +106,20 @@ export const getAllUsers = async (req, res) => {
       });
     }
 
-    // Validate pagination parameters
-    const validatedQuery = await paginationSchema.validate(req.query, {
-      abortEarly: false,
-      stripUnknown: true
-    });
-
-    const { page, limit, sortBy, sortOrder } = validatedQuery;
+    // Parse pagination directly — no external validation middleware
+    const page  = Math.max(1, parseInt(req.query.page)  || 1);
+    const limit = Math.min(100, parseInt(req.query.limit) || 20);
+    const skip  = (page - 1) * limit;
     const { search, role, isEmailVerified } = req.query;
-    const skip = (page - 1) * limit;
 
     // Build search query
     const searchQuery = {};
 
     if (search) {
       searchQuery.$or = [
-        { email: { $regex: search, $options: 'i' } },
+        { email:    { $regex: search, $options: 'i' } },
+        { fullName: { $regex: search, $options: 'i' } },
         { walletAddress: { $regex: search, $options: 'i' } },
-        { 'profile.firstName': { $regex: search, $options: 'i' } },
-        { 'profile.lastName': { $regex: search, $options: 'i' } }
       ];
     }
 
@@ -136,9 +131,7 @@ export const getAllUsers = async (req, res) => {
       searchQuery.isEmailVerified = isEmailVerified === 'true';
     }
 
-    // Build sort object
-    const sort = {};
-    sort[sortBy] = sortOrder === 'asc' ? 1 : -1;
+    const sort = { createdAt: -1 };
 
     // Get users
     const users = await User.find(searchQuery)
@@ -166,9 +159,11 @@ export const getAllUsers = async (req, res) => {
           totalUsers,
           hasNextPage,
           hasPrevPage,
-          limit
-        }
-      }
+          limit,
+        },
+      },
+      // flat arrays also for easy consumption
+      meta: { total: totalUsers, page, limit },
     });
 
   } catch (error) {
