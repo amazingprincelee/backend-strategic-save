@@ -251,9 +251,12 @@ export async function analyzeSymbol(symbol, timeframe = '1h', marketType = 'spot
     };
   }
 
-  // ── ATR-based SL / TP (1.5× / 3.0× → always 2:1 R:R) ────────────────────
-  const slDist = atrVal ? atrVal * 1.5 : price * 0.015;
-  const tpDist = atrVal ? atrVal * 3.0 : price * 0.030;
+  // ── ATR-based SL / TP (professional: 2.5× ATR with 2% floor → 2:1 R:R) ──
+  // Use 2.5× ATR but never less than 2% of price to avoid stops getting hit
+  // by normal price noise on low-volatility pairs.
+  const rawSlDist = atrVal ? atrVal * 2.5 : price * 0.02;
+  const slDist    = Math.max(rawSlDist, price * 0.02);
+  const tpDist    = slDist * 2; // maintains 2:1 R:R
 
   const entry      = price;
   const stopLoss   = signalType === 'LONG' ? entry - slDist : entry + slDist;
