@@ -16,7 +16,7 @@ class OrderManager {
    * @param {{ portionIndex, amount, takeProfitPrice, stopLossPrice, triggerReason }} signal
    * @returns {Promise<{ trade, position }>}
    */
-  async openPosition(bot, { portionIndex, amount, takeProfitPrice, stopLossPrice, triggerReason = 'entry', reason, side: signalSide }, symbolOverride) {
+  async openPosition(bot, { portionIndex, amount, takeProfitPrice, stopLossPrice, tp1Price = null, triggerReason = 'entry', reason, side: signalSide }, symbolOverride) {
     const symbol       = symbolOverride || bot.symbol;
     const positionSide = signalSide || 'long';
     // 'short' entry passes 'short' to DemoSimulator (no balance debit); long uses 'buy'
@@ -55,9 +55,11 @@ class OrderManager {
       amount: execution.amount,
       cost: execution.cost,
       entryFee: execution.fee?.cost || 0,
-      takeProfitPrice: takeProfitPrice || null,
+      takeProfitPrice:  takeProfitPrice || null,
       stopLossPrice,
-      currentPrice: execution.price
+      tp1Price:         tp1Price || null,
+      remainingAmount:  execution.amount, // ladder tracking starts at full amount
+      currentPrice:     execution.price
     });
 
     // Link trade to position
@@ -70,6 +72,93 @@ class OrderManager {
     });
 
     return { trade, position };
+  }
+
+  /**
+   * Partially close a position (ladder exit).
+   * Closes `portion` (0–1) of the remaining open amount, marks tp1Hit,
+   * and moves the stop loss to breakeven. Position stays open.
+   *
+   * @param {Object} bot
+   * @param {Object} position  - Position document
+   * @param {{ portion: number, reason: string, moveSlToBreakeven: boolean }} opts
+   * @returns {Promise<{ trade, partialPnL }>}
+   */
+  async partialClosePosition(bot, position, { portion = 0.5, reason = 'take_profit_1', moveSlToBreakeven = true } = {}) {
+    const openAmount  = position.remainingAmount ?? position.amount;
+    const closeAmount = openAmount * portion;
+    const isShort     = position.side === 'short';
+    const execSide    = isShort ? 'buy' : 'sell';
+
+    const execution = await this._executeOrder(bot, execSide, closeAmount, position.symbol);
+
+    const fees = position.entryFee * portion + (execution.fee?.cost || 0);
+    const partialPnL = isShort
+      ? (position.entryPrice - execution.price) * closeAmount - fees
+      : (execution.price - position.entryPrice) * closeAmount - fees;
+
+    // Record the partial trade
+    const trade = await Trade.create({
+      botId:        bot._id,
+      userId:       bot.userId,
+      positionId:   position._id,
+      isDemo:       bot.isDemo,
+      exchange:     bot.exchange,
+      symbol:       position.symbol,
+      side:         'sell',
+      type:         'limit',
+      price:        execution.price,
+      amount:       closeAmount,
+      cost:         execution.cost,
+      fee:          execution.fee,
+      status:       'closed',
+      orderId:      execution.orderId || null,
+      portionIndex: position.portionIndex,
+      pnl:          partialPnL,
+      triggerReason: reason
+    });
+
+    // Update position: reduce remaining amount, mark TP1 hit, move SL to breakeven
+    const newSL = moveSlToBreakeven ? position.entryPrice : position.stopLossPrice;
+    await Position.findByIdAndUpdate(position._id, {
+      remainingAmount:  openAmount - closeAmount,
+      tp1Hit:           true,
+      stopLossPrice:    newSL,  // breakeven — now risk-free
+      trailingStopActive: true, // activate trailing on remaining half
+    });
+
+    // Accumulate partial P&L in bot stats (counted as a trade)
+    const isWin = partialPnL > 0;
+    const currentBot = await BotConfig.findById(bot._id).select('stats').lean();
+    const s = currentBot?.stats || {};
+    const newWins        = (s.winningTrades  || 0) + (isWin ? 1 : 0);
+    const newLosses      = (s.losingTrades   || 0) + (!isWin ? 1 : 0);
+    const closedTrades   = newWins + newLosses;
+    const newGrossProfit = (s.grossProfit    || 0) + (isWin  ? partialPnL            : 0);
+    const newGrossLoss   = (s.grossLoss      || 0) + (!isWin ? Math.abs(partialPnL)  : 0);
+    const profitFactor   = newGrossLoss > 0 ? newGrossProfit / newGrossLoss : (newGrossProfit > 0 ? 999 : 0);
+    const winRate        = closedTrades > 0 ? (newWins / closedTrades) * 100 : 0;
+    const newConsecutive = isWin ? 0 : (s.consecutiveLosses || 0) + 1;
+
+    await BotConfig.findByIdAndUpdate(bot._id, {
+      $inc: { 'stats.totalTrades': 1, 'stats.totalPnL': partialPnL },
+      $set: {
+        'stats.winningTrades':     newWins,
+        'stats.losingTrades':      newLosses,
+        'stats.grossProfit':       newGrossProfit,
+        'stats.grossLoss':         newGrossLoss,
+        'stats.profitFactor':      parseFloat(profitFactor.toFixed(3)),
+        'stats.winRate':           parseFloat(winRate.toFixed(1)),
+        'stats.consecutiveLosses': newConsecutive,
+        'stats.lastTradeAt':       new Date(),
+      }
+    });
+
+    if (bot.isDemo) {
+      await demoSimulator.recordPnL(bot.userId, partialPnL);
+    }
+
+    return { trade, partialPnL, consecutiveLosses: newConsecutive };
   }
 
   /**
@@ -121,16 +210,37 @@ class OrderManager {
       currentPrice: execution.price
     });
 
-    // Update bot stats
+    // Update bot stats atomically
     const isWin = realizedPnL > 0;
+
+    // Fetch current stats to recompute derived metrics
+    const currentBot = await BotConfig.findById(bot._id).select('stats').lean();
+    const s = currentBot?.stats || {};
+
+    const newWins        = (s.winningTrades  || 0) + (isWin ? 1 : 0);
+    const newLosses      = (s.losingTrades   || 0) + (!isWin ? 1 : 0);
+    const closedTrades   = newWins + newLosses;
+    const newGrossProfit = (s.grossProfit    || 0) + (isWin  ? realizedPnL            : 0);
+    const newGrossLoss   = (s.grossLoss      || 0) + (!isWin ? Math.abs(realizedPnL)  : 0);
+    const profitFactor   = newGrossLoss > 0 ? newGrossProfit / newGrossLoss : (newGrossProfit > 0 ? 999 : 0);
+    const winRate        = closedTrades > 0 ? (newWins / closedTrades) * 100 : 0;
+    const newConsecutive = isWin ? 0 : (s.consecutiveLosses || 0) + 1;
+
     await BotConfig.findByIdAndUpdate(bot._id, {
       $inc: {
         'stats.totalTrades': 1,
-        'stats.totalPnL': realizedPnL,
-        'stats.winningTrades': isWin ? 1 : 0,
-        'stats.losingTrades': !isWin ? 1 : 0
+        'stats.totalPnL':    realizedPnL,
       },
-      'stats.lastTradeAt': new Date()
+      $set: {
+        'stats.winningTrades':     newWins,
+        'stats.losingTrades':      newLosses,
+        'stats.grossProfit':       newGrossProfit,
+        'stats.grossLoss':         newGrossLoss,
+        'stats.profitFactor':      parseFloat(profitFactor.toFixed(3)),
+        'stats.winRate':           parseFloat(winRate.toFixed(1)),
+        'stats.consecutiveLosses': newConsecutive,
+        'stats.lastTradeAt':       new Date(),
+      }
     });
 
     // Record P&L on demo account if applicable
@@ -138,7 +248,7 @@ class OrderManager {
       await demoSimulator.recordPnL(bot.userId, realizedPnL);
     }
 
-    return { trade, realizedPnL };
+    return { trade, realizedPnL, consecutiveLosses: newConsecutive };
   }
 
   /**
@@ -181,12 +291,49 @@ class OrderManager {
     // CCXT only accepts 'buy' or 'sell' — map futures-short entry 'short' → 'sell'
     const ccxtSide = side === 'short' ? 'sell' : side;
 
-    const order = await exchange.createMarketOrder(ccxtSymbol, ccxtSide, amount);
+    // ── Prefer limit orders at current best price for better execution ──────
+    // Limit orders save 0.05-0.15% per trade vs market orders. We place a
+    // limit at the current ask (buy) or bid (sell) and wait up to 8 seconds
+    // for a fill. If unfilled, we cancel and fall back to a market order.
+    let order;
+    try {
+      const ticker = await exchange.fetchTicker(ccxtSymbol);
+      const limitPrice = ccxtSide === 'buy'
+        ? ticker.ask || ticker.last        // buy at ask
+        : ticker.bid || ticker.last;       // sell at bid
+
+      if (limitPrice) {
+        order = await exchange.createLimitOrder(ccxtSymbol, ccxtSide, amount, limitPrice);
+
+        // Wait up to 8 seconds for the limit order to fill
+        const deadline = Date.now() + 8_000;
+        while (Date.now() < deadline) {
+          await new Promise(r => setTimeout(r, 1_500));
+          order = await exchange.fetchOrder(order.id, ccxtSymbol);
+          if (order.status === 'closed' || order.filled >= amount * 0.99) break;
+        }
+
+        // If still not filled, cancel and fall through to market order
+        if (order.status !== 'closed' && (order.filled || 0) < amount * 0.99) {
+          console.warn(`[OrderManager] Limit order ${order.id} not filled after 8s, falling back to market`);
+          await exchange.cancelOrder(order.id, ccxtSymbol).catch(() => {});
+          order = null; // trigger market fallback below
+        }
+      }
+    } catch (limitErr) {
+      console.warn(`[OrderManager] Limit order attempt failed: ${limitErr.message} — using market order`);
+      order = null;
+    }
+
+    // Fallback: market order (if limit failed or timed out)
+    if (!order || order.status !== 'closed') {
+      order = await exchange.createMarketOrder(ccxtSymbol, ccxtSide, amount);
+    }
 
     return {
       price: order.average || order.price || order.fills?.[0]?.price,
       amount: order.filled || amount,
-      cost: order.cost || (order.price * amount),
+      cost: order.cost || ((order.average || order.price) * amount),
       fee: order.fee || { cost: 0, currency: 'USDT', rate: 0 },
       orderId: order.id,
       executedAt: order.timestamp ? new Date(order.timestamp) : new Date()

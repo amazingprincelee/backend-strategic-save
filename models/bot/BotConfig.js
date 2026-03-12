@@ -72,6 +72,8 @@ const botConfigSchema = new mongoose.Schema({
     maxConcurrentTrades:  { type: Number, default: 2 },
     riskPerTrade:         { type: Number, default: 2 },
     signalMaxAgeMinutes:  { type: Number, default: 120 },
+    // Use Kelly Criterion for dynamic position sizing (requires ≥20 closed trades)
+    useKellySizing:       { type: Boolean, default: false },
     // SwingRider specific
     swingLookback:        { type: Number, default: 5 },
     maxScaleIns:          { type: Number, default: 2 },
@@ -88,8 +90,12 @@ const botConfigSchema = new mongoose.Schema({
   },
   riskParams: {
     globalDrawdownLimitPercent: { type: Number, default: 15 },
-    dailyLossLimitPercent: { type: Number, default: 5 },
-    enableNewsFilter: { type: Boolean, default: false }
+    dailyLossLimitPercent:      { type: Number, default: 5 },
+    // Pause bot after N consecutive losing trades (0 = disabled)
+    maxConsecutiveLosses:       { type: Number, default: 5 },
+    // Hard cap: effectiveRisk = riskPerTrade * leverage cannot exceed this %
+    maxLeverageRiskPct:         { type: Number, default: 20 },
+    enableNewsFilter:           { type: Boolean, default: false }
   },
   status: {
     type: String,
@@ -101,16 +107,23 @@ const botConfigSchema = new mongoose.Schema({
     default: ''
   },
   stats: {
-    totalTrades: { type: Number, default: 0 },
-    winningTrades: { type: Number, default: 0 },
-    losingTrades: { type: Number, default: 0 },
-    totalPnL: { type: Number, default: 0 },
-    totalPnLPercent: { type: Number, default: 0 },
-    startingCapital: { type: Number, default: 0 },
-    currentCapital: { type: Number, default: 0 },
-    peakCapital: { type: Number, default: 0 },
-    maxDrawdown: { type: Number, default: 0 },
-    lastTradeAt: { type: Date, default: null }
+    totalTrades:       { type: Number, default: 0 },
+    winningTrades:     { type: Number, default: 0 },
+    losingTrades:      { type: Number, default: 0 },
+    totalPnL:          { type: Number, default: 0 },
+    totalPnLPercent:   { type: Number, default: 0 },
+    startingCapital:   { type: Number, default: 0 },
+    currentCapital:    { type: Number, default: 0 },
+    peakCapital:       { type: Number, default: 0 },
+    maxDrawdown:       { type: Number, default: 0 },
+    lastTradeAt:       { type: Date,   default: null },
+    // ── Performance analytics ──────────────────────────────────────────────
+    grossProfit:       { type: Number, default: 0 },   // sum of all winning trade P&L
+    grossLoss:         { type: Number, default: 0 },   // sum of abs(losing trade P&L)
+    profitFactor:      { type: Number, default: 0 },   // grossProfit / grossLoss (>1 = profitable)
+    winRate:           { type: Number, default: 0 },   // winningTrades / closedTrades * 100
+    // ── Consecutive loss tracking ──────────────────────────────────────────
+    consecutiveLosses: { type: Number, default: 0 },   // resets to 0 on any winning trade
   },
   startedAt: { type: Date, default: null },
   stoppedAt: { type: Date, default: null },

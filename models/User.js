@@ -100,8 +100,8 @@ const userSchema = new mongoose.Schema({
 });
 
 // Indexes for better query performance
+// Note: 'referral.code' index is declared inline via unique:true+sparse:true — no duplicate needed here
 userSchema.index({ createdAt: -1 });
-userSchema.index({ 'referral.code': 1 });
 userSchema.index({ 'subscription.expiresAt': 1 });
 
 // Virtual: is user currently on premium?

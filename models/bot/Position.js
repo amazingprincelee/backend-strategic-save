@@ -25,7 +25,12 @@ const positionSchema = new mongoose.Schema({
   stopLossPrice: { type: Number, required: true },
   trailingStopActive: { type: Boolean, default: false },
   trailingStopPrice: { type: Number, default: null },
-  highestPriceSinceEntry: { type: Number, default: null },
+  highestPriceSinceEntry: { type: Number, default: null }, // LONG: for trailing stop
+  lowestPriceSinceEntry:  { type: Number, default: null }, // SHORT: for trailing stop
+  // ── Ladder exit fields ────────────────────────────────────────────────────
+  tp1Price:         { type: Number,  default: null  }, // 1:1 R:R target (50% close)
+  tp1Hit:           { type: Boolean, default: false }, // has TP1 been taken
+  remainingAmount:  { type: Number,  default: null  }, // open size after partial closes
   currentPrice: { type: Number, default: null },
   unrealizedPnL: { type: Number, default: 0 },
   unrealizedPnLPercent: { type: Number, default: 0 },
@@ -37,7 +42,7 @@ const positionSchema = new mongoose.Schema({
   },
   closeReason: {
     type: String,
-    enum: ['take_profit', 'stop_loss', 'trailing_stop', 'manual', 'drawdown_limit'],
+    enum: ['take_profit', 'take_profit_1', 'stop_loss', 'trailing_stop', 'manual', 'drawdown_limit'],
     default: null
   },
   closePrice: { type: Number, default: null },

@@ -230,15 +230,20 @@ class BotEngine {
       });
 
       // Execute signals
+      // openedThisTick prevents race condition: risk check accounts for positions
+      // queued earlier in this same loop iteration that haven't been saved yet.
+      let openedThisTick = 0;
+      let hadClose = false;
+
       for (const signal of signals) {
         if (signal.action === 'buy') {
-          const riskCheck = await riskEngine.checkCanOpenPosition(bot);
+          const riskCheck = await riskEngine.checkCanOpenPosition(bot, openedThisTick);
           if (riskCheck.allowed) {
             try {
-              // For multi-pair bots the signal carries its own symbol
               const tradeSymbol = signal.symbol || bot.symbol;
               const { position } = await orderManager.openPosition(bot, signal, tradeSymbol);
               this._emitTrade(bot, 'buy', position.entryPrice, signal.amount, position._id, null, tradeSymbol);
+              openedThisTick++;
             } catch (orderErr) {
               console.error(`[BotEngine] Buy order failed for bot ${botId}:`, orderErr.message);
             }
@@ -252,14 +257,39 @@ class BotEngine {
             try {
               const { realizedPnL } = await orderManager.closePosition(bot, position, signal.reason);
               this._emitTrade(bot, 'sell', position.currentPrice, position.amount, position._id, realizedPnL, position.symbol);
+              hadClose = true;
             } catch (orderErr) {
               console.error(`[BotEngine] Sell order failed for bot ${botId}:`, orderErr.message);
+            }
+          }
+        } else if (signal.action === 'partial_sell') {
+          // Ladder exit: close first half at TP1, move SL to breakeven
+          const position = openPositions.find(p =>
+            p._id.toString() === signal.positionId?.toString() ||
+            p.portionIndex === signal.portionIndex
+          );
+          if (position) {
+            try {
+              const { partialPnL } = await orderManager.partialClosePosition(bot, position, {
+                portion:           signal.portion || 0.5,
+                reason:            signal.reason  || 'take_profit_1',
+                moveSlToBreakeven: signal.moveSlToBreakeven ?? true,
+              });
+              this._emitTrade(bot, 'sell', position.currentPrice, position.amount * (signal.portion || 0.5), position._id, partialPnL, position.symbol);
+              hadClose = true;
+            } catch (orderErr) {
+              console.error(`[BotEngine] Partial sell failed for bot ${botId}:`, orderErr.message);
             }
           }
         }
       }
 
-      // Check if bot should be paused (drawdown limit)
+      // Re-fetch bot after trades so shouldPauseBot sees updated stats (consecutiveLosses etc.)
+      if (openedThisTick > 0 || hadClose) {
+        bot = await BotConfig.findById(botId);
+      }
+
+      // Check if bot should be paused (drawdown + consecutive loss limits)
       const pauseReason = riskEngine.shouldPauseBot(bot);
       if (pauseReason) {
         await BotConfig.findByIdAndUpdate(botId, {

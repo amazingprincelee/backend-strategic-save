@@ -3,6 +3,25 @@ import DemoAccount from '../../models/DemoAccount.js';
 
 const TAKER_FEE_RATE = 0.001; // 0.1% simulated taker fee
 
+// Tiered spread simulation — major pairs are liquid (tight spread),
+// altcoins are illiquid (wide spread). This makes demo P&L realistic
+// instead of optimistically assuming 0.05% for everything.
+const MAJOR_PAIRS  = new Set(['BTCUSDT','ETHUSDT','BNBUSDT','SOLUSDT','XRPUSDT','USDCUSDT','BUSDUSDT']);
+const MID_PAIRS    = new Set(['ADAUSDT','DOTUSDT','AVAXUSDT','MATICUSDT','LINKUSDT','LTCUSDT','UNIUSDT','ATOMUSDT','NEARUSDT','APTUSDT','ARBUSDT','OPUSDT','SEIUSDT','INJUSDT']);
+
+/**
+ * Get simulated spread rate for a symbol.
+ *   Major pairs  → 0.05% (tight)
+ *   Mid caps     → 0.15% (normal)
+ *   Altcoins     → 0.40% (wide — reflects real illiquidity)
+ */
+function getSpreadRate(sym) {
+  const s = sym.toUpperCase().replace('/', '');
+  if (MAJOR_PAIRS.has(s)) return 0.0005;
+  if (MID_PAIRS.has(s))   return 0.0015;
+  return 0.004;
+}
+
 /**
  * DemoSimulator - executes virtual orders using real live market prices.
  * No real trades are placed. Virtual balance is tracked in DemoAccount.
@@ -25,8 +44,10 @@ class DemoSimulator {
     let price;
     try {
       const ticker = await marketDataService.fetchTicker(sym, marketType);
-      // Use ask for buys (you pay more), bid for sells (you receive less) — 0.05% spread sim
-      price = side === 'buy' ? ticker.lastPrice * 1.0005 : ticker.lastPrice * 0.9995;
+      // Apply tiered spread: major pairs get tight spread, altcoins get wide spread.
+      // This makes demo P&L realistic — real slippage on altcoins can be 0.3-0.5%.
+      const spread = getSpreadRate(sym);
+      price = side === 'buy' ? ticker.lastPrice * (1 + spread) : ticker.lastPrice * (1 - spread);
     } catch {
       throw new Error(`Cannot fetch price for ${symbol}`);
     }

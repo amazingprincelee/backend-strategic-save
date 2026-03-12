@@ -28,6 +28,7 @@ import signalRoutes       from './routes/signals.js';
 import paymentRoutes      from './routes/payments.js';
 import supportRoutes     from './routes/support.js';
 import withdrawalRoutes  from './routes/withdrawals.js';
+import alphaRoutes       from './routes/alpha.js';
 
 // Import services
 import emailService from './utils/emailService.js';
@@ -44,6 +45,7 @@ import { verifyToken } from './utils/jwt.js';
 // Technical Analysis Engine + cron sweep
 import cron from 'node-cron';
 import { sweepTopPairs } from './services/TechnicalAnalysisEngine.js';
+import { runAlphaSweep } from './services/EarlyAlphaService.js';
 import SignalModel from './models/Signal.js';
 // Exchange pairs preloader (DB-backed, monthly refresh)
 import { refreshStaleExchangePairs } from './controllers/signalController.js';
@@ -168,6 +170,7 @@ app.use('/api/signals',          signalRoutes);
 app.use('/api/payments',         paymentRoutes);
 app.use('/api/support',          supportRoutes);
 app.use('/api/withdrawals',      withdrawalRoutes);
+app.use('/api/alpha',            alphaRoutes);
 
 // Root endpoint
 app.get('/', (req, res) => {
@@ -398,6 +401,17 @@ const startServer = async () => {
     console.log('📡 Scheduling Technical Analysis sweep (every 15 min, spot + futures)...');
     cron.schedule('*/15 * * * *', runSweep);
     console.log('✅ Technical Analysis sweep scheduled every 15 min (spot + futures)');
+
+    // Early Alpha sweep — scans CoinGecko + volume + whale data every 5 minutes.
+    // Stagger by 2 min so it doesn't collide with the TA sweep on the :15 boundary.
+    cron.schedule('2-59/5 * * * *', async () => {
+      try {
+        await runAlphaSweep();
+      } catch (err) {
+        console.warn('[EarlyAlpha] Cron sweep error:', err.message);
+      }
+    });
+    console.log('✅ Early Alpha sweep scheduled every 5 min');
 
     // Nightly signal cleanup — delete signals older than 30 days at 2 AM UTC.
     // Prevents the Signal collection from growing unbounded on a budget MongoDB instance.
