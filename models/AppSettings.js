@@ -11,7 +11,7 @@ const appSettingsSchema = new mongoose.Schema({
   activePaymentProvider: {
     type: String,
     enum: ['coinbase_commerce', 'nowpayments', 'cryptopay'],
-    default: 'coinbase_commerce',
+    default: 'nowpayments',
   },
 
   // Pricing
