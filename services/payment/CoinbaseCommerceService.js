@@ -8,21 +8,18 @@
  */
 
 import crypto from 'crypto';
+import { getPaymentKeys } from './paymentKeys.js';
 
 const BASE_URL = 'https://api.commerce.coinbase.com';
 
 class CoinbaseCommerceService {
-  constructor() {
-    this.apiKey = process.env.COINBASE_COMMERCE_API_KEY || '';
-    this.webhookSecret = process.env.COINBASE_COMMERCE_WEBHOOK_SECRET || '';
-  }
-
   async _request(method, path, body = null) {
+    const { coinbaseApiKey } = await getPaymentKeys();
     const res = await fetch(`${BASE_URL}${path}`, {
       method,
       headers: {
         'Content-Type':    'application/json',
-        'X-CC-Api-Key':    this.apiKey,
+        'X-CC-Api-Key':    coinbaseApiKey,
         'X-CC-Version':    '2018-03-22',
       },
       ...(body ? { body: JSON.stringify(body) } : {}),
@@ -58,11 +55,12 @@ class CoinbaseCommerceService {
    * Verify webhook signature and return the event type + charge data.
    * Returns { event, chargeId, userId, status } or throws if invalid.
    */
-  verifyWebhook(rawBody, signatureHeader) {
-    if (!this.webhookSecret) throw new Error('Webhook secret not configured');
+  async verifyWebhook(rawBody, signatureHeader) {
+    const { coinbaseWebhookSecret } = await getPaymentKeys();
+    if (!coinbaseWebhookSecret) throw new Error('Webhook secret not configured');
 
     const sig = crypto
-      .createHmac('sha256', this.webhookSecret)
+      .createHmac('sha256', coinbaseWebhookSecret)
       .update(rawBody, 'utf8')
       .digest('hex');
 

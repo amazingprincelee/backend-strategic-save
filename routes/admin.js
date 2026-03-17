@@ -21,6 +21,7 @@ import { adminActivatePremium } from '../controllers/paymentController.js';
 import Subscription from '../models/Subscription.js';
 import AppSettings, { getSettings } from '../models/AppSettings.js';
 import { authenticate, requireAdmin } from '../middleware/auth.js';
+import { invalidatePaymentKeyCache } from '../services/payment/paymentKeys.js';
 
 const router = express.Router();
 
@@ -131,6 +132,49 @@ router.post('/grant-trial',      adminActionLimiter, grantFreeTrial);
 router.get('/analytics/revenue',  adminLimiter, getRevenueAnalytics);
 router.get('/analytics/users',    adminLimiter, getUserAnalytics);
 router.get('/analytics/platform', adminLimiter, getPlatformAnalytics);
+
+// Payment API Keys — write-only (never returned in plain text in GET /settings)
+router.get('/payment-keys/status', adminLimiter, async (req, res) => {
+  try {
+    const s = await getSettings();
+    // Return only whether each key is configured, not the actual values
+    res.json({
+      success: true,
+      data: {
+        nowpayments:  { apiKey: !!s.nowpaymentsApiKey, ipnSecret: !!s.nowpaymentsIpnSecret },
+        coinbase:     { apiKey: !!s.coinbaseApiKey, webhookSecret: !!s.coinbaseWebhookSecret },
+        cryptopay:    { apiKey: !!s.cryptopayApiKey, apiSecret: !!s.cryptopayApiSecret, callbackSecret: !!s.cryptopayCallbackSecret },
+      },
+    });
+  } catch (e) {
+    res.status(500).json({ success: false, message: e.message });
+  }
+});
+
+router.put('/payment-keys', adminActionLimiter, async (req, res) => {
+  try {
+    const allowed = [
+      'nowpaymentsApiKey', 'nowpaymentsIpnSecret',
+      'coinbaseApiKey', 'coinbaseWebhookSecret',
+      'cryptopayApiKey', 'cryptopayApiSecret', 'cryptopayCallbackSecret',
+    ];
+    const update = {};
+    for (const key of allowed) {
+      if (req.body[key] !== undefined && req.body[key] !== '') {
+        update[key] = req.body[key];
+      }
+    }
+    await AppSettings.findOneAndUpdate(
+      { key: 'global' },
+      { $set: { ...update, updatedBy: req.user._id } },
+      { new: true, upsert: true }
+    );
+    invalidatePaymentKeyCache();
+    res.json({ success: true, message: 'Payment keys updated successfully' });
+  } catch (e) {
+    res.status(500).json({ success: false, message: e.message });
+  }
+});
 
 // Announcement
 router.put('/announcement', adminActionLimiter, updateAnnouncement);

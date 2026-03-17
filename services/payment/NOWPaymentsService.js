@@ -8,21 +8,18 @@
  */
 
 import crypto from 'crypto';
+import { getPaymentKeys } from './paymentKeys.js';
 
 const BASE_URL = 'https://api.nowpayments.io/v1';
 
 class NOWPaymentsService {
-  constructor() {
-    this.apiKey    = process.env.NOWPAYMENTS_API_KEY || '';
-    this.ipnSecret = process.env.NOWPAYMENTS_IPN_SECRET || '';
-  }
-
   async _request(method, path, body = null) {
+    const { nowpaymentsApiKey } = await getPaymentKeys();
     const res = await fetch(`${BASE_URL}${path}`, {
       method,
       headers: {
         'Content-Type': 'application/json',
-        'x-api-key':    this.apiKey,
+        'x-api-key':    nowpaymentsApiKey,
       },
       ...(body ? { body: JSON.stringify(body) } : {}),
     });
@@ -62,10 +59,11 @@ class NOWPaymentsService {
   /**
    * Verify IPN webhook (HMAC-SHA512).
    */
-  verifyWebhook(rawBody, signatureHeader) {
-    if (!this.ipnSecret) throw new Error('IPN secret not configured');
+  async verifyWebhook(rawBody, signatureHeader) {
+    const { nowpaymentsIpnSecret } = await getPaymentKeys();
+    if (!nowpaymentsIpnSecret) throw new Error('IPN secret not configured');
     const sig = crypto
-      .createHmac('sha512', this.ipnSecret)
+      .createHmac('sha512', nowpaymentsIpnSecret)
       .update(rawBody, 'utf8')
       .digest('hex');
     if (sig !== signatureHeader) throw new Error('Invalid NOWPayments IPN signature');

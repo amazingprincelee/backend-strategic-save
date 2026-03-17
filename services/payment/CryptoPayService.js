@@ -9,30 +9,25 @@
  */
 
 import crypto from 'crypto';
+import { getPaymentKeys } from './paymentKeys.js';
 
 const BASE_URL = 'https://business.cryptopay.me';
 
 class CryptoPayService {
-  constructor() {
-    this.apiKey      = process.env.CRYPTOPAY_API_KEY      || '';
-    this.apiSecret   = process.env.CRYPTOPAY_API_SECRET   || '';
-    this.callbackSecret = process.env.CRYPTOPAY_CALLBACK_SECRET || '';
-  }
-
-  _sign(method, path, body = '') {
-    // CryptoPay uses HMAC-SHA256 of "METHOD /path\nbody"
+  _sign(apiSecret, method, path, body = '') {
     const message = `${method}\n${path}\n${body}`;
-    return crypto.createHmac('sha256', this.apiSecret).update(message).digest('hex');
+    return crypto.createHmac('sha256', apiSecret).update(message).digest('hex');
   }
 
   async _request(method, path, body = null) {
+    const { cryptopayApiKey, cryptopayApiSecret } = await getPaymentKeys();
     const bodyStr = body ? JSON.stringify(body) : '';
     const res = await fetch(`${BASE_URL}${path}`, {
       method,
       headers: {
         'Content-Type':         'application/json',
-        'X-Access-Key':         this.apiKey,
-        'X-Signature':          this._sign(method, path, bodyStr),
+        'X-Access-Key':         cryptopayApiKey,
+        'X-Signature':          this._sign(cryptopayApiSecret, method, path, bodyStr),
       },
       ...(body ? { body: bodyStr } : {}),
     });
@@ -66,10 +61,11 @@ class CryptoPayService {
   /**
    * Verify CryptoPay webhook signature.
    */
-  verifyWebhook(rawBody, signatureHeader) {
-    if (!this.callbackSecret) throw new Error('Callback secret not configured');
+  async verifyWebhook(rawBody, signatureHeader) {
+    const { cryptopayCallbackSecret } = await getPaymentKeys();
+    if (!cryptopayCallbackSecret) throw new Error('Callback secret not configured');
     const sig = crypto
-      .createHmac('sha256', this.callbackSecret)
+      .createHmac('sha256', cryptopayCallbackSecret)
       .update(rawBody, 'utf8')
       .digest('hex');
     if (sig !== signatureHeader) throw new Error('Invalid CryptoPay webhook signature');

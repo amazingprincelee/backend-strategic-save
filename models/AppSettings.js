@@ -39,6 +39,15 @@ const appSettingsSchema = new mongoose.Schema({
   freeTrialDays:       { type: Number, default: 7 },
   minWithdrawalAmount: { type: Number, default: 10 },  // minimum $USD referral withdrawal
 
+  // Payment provider API keys (stored in DB so admin can update without server restart)
+  nowpaymentsApiKey:        { type: String, default: '' },
+  nowpaymentsIpnSecret:     { type: String, default: '' },
+  coinbaseApiKey:           { type: String, default: '' },
+  coinbaseWebhookSecret:    { type: String, default: '' },
+  cryptopayApiKey:          { type: String, default: '' },
+  cryptopayApiSecret:       { type: String, default: '' },
+  cryptopayCallbackSecret:  { type: String, default: '' },
+
   updatedBy: { type: mongoose.Schema.Types.ObjectId, ref: 'User', default: null },
 }, { timestamps: true });
 
