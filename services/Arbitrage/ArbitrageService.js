@@ -81,7 +81,79 @@ function extractCoinStatus(currency) {
 }
 
 /**
- * Enrich opportunities with transfer status.
+ * Extract all known contract addresses from a CCXT currency object.
+ * Different exchanges expose this under different field names.
+ * Returns a Set of lowercase hex addresses (ignoring chain prefixes).
+ */
+function extractContractAddresses(currency) {
+  if (!currency) return new Set();
+  const addrs = new Set();
+
+  const normalise = (v) => {
+    if (typeof v !== 'string' || v.length < 10) return null;
+    // Strip chain prefix like "ETH:" or "BEP20:"
+    const raw = v.includes(':') ? v.split(':').pop() : v;
+    return raw.toLowerCase();
+  };
+
+  const tryAdd = (v) => { const n = normalise(v); if (n) addrs.add(n); };
+
+  // Direct fields
+  tryAdd(currency.info?.contractAddress);
+  tryAdd(currency.info?.contract_address);
+  tryAdd(currency.info?.tokenAddress);
+  tryAdd(currency.info?.token_address);
+  tryAdd(currency.info?.erc20ContractAddress);
+  tryAdd(currency.info?.bep20ContractAddress);
+  tryAdd(currency.info?.address);
+
+  // Per-network contract addresses
+  if (currency.networks) {
+    for (const net of Object.values(currency.networks)) {
+      tryAdd(net.id);
+      tryAdd(net.info?.contractAddress);
+      tryAdd(net.info?.contract_address);
+      tryAdd(net.info?.address);
+    }
+  }
+
+  return addrs;
+}
+
+/**
+ * Detect ticker collision: same symbol, different underlying coin.
+ * Returns true when we can CONFIRM the two exchanges list different coins.
+ * Returns false when addresses match OR when we can't determine (unknown).
+ *
+ * Strategy:
+ *  1. Contract address mismatch  → definitive collision
+ *  2. Price ratio > 10×          → very likely collision (fallback when no addresses)
+ */
+function isTickerCollision(buyCurrency, sellCurrency, buyPrice, sellPrice) {
+  // ── 1. Contract address comparison ────────────────────────────────────
+  const buyAddrs  = extractContractAddresses(buyCurrency);
+  const sellAddrs = extractContractAddresses(sellCurrency);
+
+  if (buyAddrs.size > 0 && sellAddrs.size > 0) {
+    // Check if ANY address overlaps
+    const hasOverlap = [...buyAddrs].some(a => sellAddrs.has(a));
+    if (hasOverlap)  return false; // Same contract → definitely same coin
+    return true;                   // No overlap    → different coins confirmed
+  }
+
+  // ── 2. Price ratio fallback (when contract data unavailable) ──────────
+  // Real arbitrage never has a 10× price difference.
+  // Native chains (BTC, ETH, SOL) have no contracts — use this as fallback.
+  if (buyPrice && sellPrice && buyPrice > 0 && sellPrice > 0) {
+    const ratio = Math.max(buyPrice, sellPrice) / Math.min(buyPrice, sellPrice);
+    if (ratio > 10) return true;  // 10× price difference → almost certainly different coins
+  }
+
+  return false; // Can't confirm collision — allow through
+}
+
+/**
+ * Enrich opportunities with transfer status + ticker-collision detection.
  * Key for arbitrage: can we WITHDRAW base from the buy exchange and DEPOSIT it to the sell exchange?
  * Quote currency (USDT) stays on each exchange separately — no transfer needed.
  */
@@ -97,15 +169,26 @@ async function enrichTransferStatus(opportunities) {
     currencyMap[name] = await getExchangeCurrencies(name);
   }));
 
+  const valid = [];
+
   for (const opp of opportunities) {
     const baseCoin = opp.symbol.split('/')[0];
     const buyCurs  = currencyMap[opp.buyExchange];
     const sellCurs = currencyMap[opp.sellExchange];
 
-    const buyStatus  = extractCoinStatus(buyCurs?.[baseCoin]);
-    const sellStatus = extractCoinStatus(sellCurs?.[baseCoin]);
+    const buyCurrency  = buyCurs?.[baseCoin]  || null;
+    const sellCurrency = sellCurs?.[baseCoin] || null;
 
-    // Arbitrage transfer: withdraw from buy exchange + deposit to sell exchange
+    // ── Ticker collision check ─────────────────────────────────────────
+    if (isTickerCollision(buyCurrency, sellCurrency, opp.buyPrice, opp.sellPrice)) {
+      console.log(`[Arbitrage] Ticker collision detected — ${opp.symbol} on ${opp.buyExchange}/${opp.sellExchange} (different contracts or ${(Math.max(opp.buyPrice, opp.sellPrice)/Math.min(opp.buyPrice, opp.sellPrice)).toFixed(1)}× price ratio). Skipped.`);
+      continue; // Drop — not a real arbitrage opportunity
+    }
+
+    // ── Transfer status ────────────────────────────────────────────────
+    const buyStatus  = extractCoinStatus(buyCurrency);
+    const sellStatus = extractCoinStatus(sellCurrency);
+
     const canWithdraw = buyStatus.withdraw;
     const canDeposit  = sellStatus.deposit;
 
@@ -114,21 +197,21 @@ async function enrichTransferStatus(opportunities) {
     } else if (canWithdraw === false || canDeposit === false) {
       opp.transferStatus = 'Blocked';
     } else {
-      // Unknown — either API doesn't expose status or coin not in currency list
-      // If coin is not found in currency list at all, flag it
-      const notOnBuy  = buyCurs  && !buyCurs[baseCoin];
-      const notOnSell = sellCurs && !sellCurs[baseCoin];
+      const notOnBuy  = buyCurs  && !buyCurrency;
+      const notOnSell = sellCurs && !sellCurrency;
       opp.transferStatus = (notOnBuy || notOnSell) ? 'Unverified' : 'Unknown';
     }
 
     opp._transferDetails = {
-      buyCanWithdraw:  canWithdraw,
-      sellCanDeposit:  canDeposit,
-      coinOnBuyExchange:  buyCurs  ? !!buyCurs[baseCoin]  : null,
-      coinOnSellExchange: sellCurs ? !!sellCurs[baseCoin] : null,
+      buyCanWithdraw:     canWithdraw,
+      sellCanDeposit:     canDeposit,
+      coinOnBuyExchange:  buyCurs  ? !!buyCurrency  : null,
+      coinOnSellExchange: sellCurs ? !!sellCurrency : null,
     };
+
+    valid.push(opp);
   }
-  return opportunities;
+  return valid;
 }
 
 const ALERT_THRESHOLD_PERCENT = 0.20; // minimum net profit % to store + email + in-app notification
@@ -469,8 +552,18 @@ async function performScan(userPreferences = null) {
     // Perform the scan in batches
     const rawOpportunities = await processBatches(symbols, scanConfig);
 
+    // Second ticker-collision guard at service level:
+    // Drop any opportunity where sell price is > 2× buy price (100% spread).
+    // ArbitrageEngine already catches most cases at 25%, but this handles
+    // edge cases where VWAP smoothing might mask an extreme collision.
+    const sanityFiltered = rawOpportunities.filter(o => {
+      if (!o.buyPrice || !o.sellPrice) return true;
+      const ratio = o.sellPrice / o.buyPrice;
+      return ratio < 2.0; // same coin cannot legitimately be 2× cheaper on one exchange
+    });
+
     // Enrich with transfer status (deposit/withdraw per exchange)
-    const opportunities = await enrichTransferStatus(rawOpportunities);
+    const opportunities = await enrichTransferStatus(sanityFiltered);
 
     // Update cache
     cachedOpportunities = opportunities;

@@ -1,6 +1,24 @@
 import AlphaSignal from '../models/AlphaSignal.js';
 import User from '../models/User.js';
 import marketDataService from '../services/MarketDataService.js';
+import axios from 'axios';
+
+// Simple price cache — refreshed every 30s per symbol
+const _priceCache = new Map(); // symbol → { price, ts }
+const PRICE_CACHE_TTL = 30_000;
+
+async function fetchLivePriceGateio(symbolUsdt) {
+  // Gate.io uses underscore format: OGNUSDT → OGN_USDT
+  const base = symbolUsdt.replace('USDT', '');
+  const pair = `${base}_USDT`;
+  const res = await axios.get(
+    `https://api.gateio.ws/api/v4/spot/tickers?currency_pair=${pair}`,
+    { timeout: 5000 }
+  );
+  const ticker = res.data?.[0];
+  if (ticker?.last) return parseFloat(ticker.last);
+  return null;
+}
 
 // Helper: is the user premium or admin?
 const isPremiumUser = (req) => {
@@ -311,6 +329,46 @@ export async function analyzeAlphaSignal(req, res) {
   } catch (err) {
     console.error('[alphaController] analyzeAlphaSignal:', err.message);
     res.status(500).json({ success: false, message: 'Analysis failed' });
+  }
+}
+
+/**
+ * GET /api/alpha/live-prices?symbols=OGNUSDT,PEPEUSDT,...
+ * Returns current market price for each requested symbol.
+ * Auth required (same as signal list).
+ */
+export async function getLivePrices(req, res) {
+  try {
+    const raw = req.query.symbols || '';
+    const symbols = raw.split(',').map(s => s.trim().toUpperCase()).filter(Boolean).slice(0, 30);
+
+    if (!symbols.length) return res.json({ success: true, data: {} });
+
+    const now = Date.now();
+    const result = {};
+
+    await Promise.all(symbols.map(async (sym) => {
+      // Return cached price if fresh
+      const cached = _priceCache.get(sym);
+      if (cached && now - cached.ts < PRICE_CACHE_TTL) {
+        result[sym] = cached.price;
+        return;
+      }
+      try {
+        const price = await fetchLivePriceGateio(sym);
+        if (price != null) {
+          _priceCache.set(sym, { price, ts: now });
+          result[sym] = price;
+        }
+      } catch {
+        // Leave missing — frontend shows "—"
+      }
+    }));
+
+    res.json({ success: true, data: result });
+  } catch (err) {
+    console.error('[alphaController] getLivePrices:', err.message);
+    res.status(500).json({ success: false, message: 'Failed to fetch prices' });
   }
 }
 

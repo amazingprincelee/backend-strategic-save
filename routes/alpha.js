@@ -1,11 +1,14 @@
 import express from 'express';
 import { authenticate } from '../middleware/auth.js';
-import { getAlphaSignals, getAlphaStats, toggleFavorite, getFavorites, analyzeAlphaSignal } from '../controllers/alphaController.js';
+import { getAlphaSignals, getAlphaStats, toggleFavorite, getFavorites, analyzeAlphaSignal, getLivePrices } from '../controllers/alphaController.js';
 
 const router = express.Router();
 
 // Stats are public (shown on dashboard card)
 router.get('/stats', getAlphaStats);
+
+// Live prices for displayed symbols (auth required)
+router.get('/live-prices', authenticate, getLivePrices);
 
 // Favorites (auth required)
 router.get('/favorites',       authenticate, getFavorites);

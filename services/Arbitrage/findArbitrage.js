@@ -91,9 +91,14 @@ export function findArbitrageOpportunities(allPricesData, config = {}) {
     // Calculate profit
     const profitPerCoin = highestBid.price - lowestAsk.price;
     const profitPercent = (profitPerCoin / lowestAsk.price) * 100;
-    
+
     // Skip if profit is below threshold
     if (profitPercent < settings.minProfitPercent) continue;
+
+    // Last-resort spread cap: primary collision detection uses contract addresses
+    // (in ArbitrageService). This 50% cap is a fallback for when currency data
+    // is unavailable and prices are obviously from different projects.
+    if (profitPercent > 50) continue;
     
     const [coin, quote] = symbol.split('/'); // BTC/USDT -> BTC, USDT
     

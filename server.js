@@ -47,6 +47,8 @@ import cron from 'node-cron';
 import { sweepTopPairs } from './services/TechnicalAnalysisEngine.js';
 import { runAlphaSweep } from './services/EarlyAlphaService.js';
 import SignalModel from './models/Signal.js';
+import AlphaSignal from './models/AlphaSignal.js';
+import axios from 'axios';
 // Exchange pairs preloader (DB-backed, monthly refresh)
 import { refreshStaleExchangePairs } from './controllers/signalController.js';
 // User model for subscription reminder cron
@@ -412,6 +414,53 @@ const startServer = async () => {
       }
     });
     console.log('✅ Early Alpha sweep scheduled every 5 min');
+
+    // Alpha live price broadcast — fetches Gate.io prices for all active alpha signals
+    // and pushes to all connected Socket.IO clients every 30 seconds.
+    // One server-side call serves all users — far cheaper than per-client HTTP polling.
+    const _alphaPriceCache = new Map(); // symbol → { price, ts }
+    const ALPHA_PRICE_TTL  = 28_000;   // slightly less than broadcast interval
+
+    const broadcastAlphaPrices = async () => {
+      try {
+        const signals = await AlphaSignal.find({ isActive: true }).select('symbol').lean();
+        const symbols = [...new Set(signals.map(s => s.symbol))];
+        if (!symbols.length) return;
+
+        const now    = Date.now();
+        const prices = {};
+        await Promise.all(symbols.map(async (sym) => {
+          const cached = _alphaPriceCache.get(sym);
+          if (cached && now - cached.ts < ALPHA_PRICE_TTL) {
+            prices[sym] = cached.price;
+            return;
+          }
+          try {
+            const pair = `${sym.replace('USDT', '')}_USDT`;
+            const res  = await axios.get(
+              `https://api.gateio.ws/api/v4/spot/tickers?currency_pair=${pair}`,
+              { timeout: 5000 }
+            );
+            const price = parseFloat(res.data?.[0]?.last);
+            if (!isNaN(price)) {
+              _alphaPriceCache.set(sym, { price, ts: now });
+              prices[sym] = price;
+            }
+          } catch { /* skip failed symbols */ }
+        }));
+
+        if (Object.keys(prices).length > 0) {
+          io.emit('alpha:prices', prices);
+        }
+      } catch (err) {
+        console.warn('[Alpha prices] Broadcast error:', err.message);
+      }
+    };
+
+    // Broadcast immediately after first alpha sweep settles, then every 30s
+    setTimeout(broadcastAlphaPrices, 15_000);
+    setInterval(broadcastAlphaPrices, 30_000);
+    console.log('✅ Alpha live price broadcast scheduled every 30s (Socket.IO)');
 
     // Nightly signal cleanup — delete signals older than 30 days at 2 AM UTC.
     // Prevents the Signal collection from growing unbounded on a budget MongoDB instance.

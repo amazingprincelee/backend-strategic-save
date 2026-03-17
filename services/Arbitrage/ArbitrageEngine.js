@@ -114,6 +114,13 @@ function detectArbitragePair(orderBook1, orderBook2, config = DEFAULT_CONFIG) {
  * @param {Object} config - Configuration
  * @returns {ArbitrageOpportunity|null}
  */
+// Last-resort spread cap — catches ticker collisions when contract address data
+// is unavailable (e.g. native chains, exchanges that don't expose addresses).
+// The primary collision check (contract address + 10× price ratio) runs later
+// in ArbitrageService.enrichTransferStatus after currencies are fetched.
+// 50% gives room for extreme-but-real events while blocking obvious collisions.
+const MAX_REALISTIC_SPREAD_PERCENT = 50;
+
 function analyzeDirection(buyOrderBook, sellOrderBook, config) {
   const { bestAsk } = buyOrderBook;
   const { bestBid } = sellOrderBook;
@@ -125,6 +132,16 @@ function analyzeDirection(buyOrderBook, sellOrderBook, config) {
 
   // Calculate gross spread
   const grossSpreadPercent = ((bestBid - bestAsk) / bestAsk) * 100;
+
+  // ── Ticker-collision guard ──────────────────────────────────────────────
+  // If the spread is unrealistically large, the two exchanges are almost
+  // certainly trading DIFFERENT coins that share the same ticker symbol.
+  // Examples: BBT, BIT, ONE, HERO, BIFI etc. are each used by multiple projects.
+  // A price ratio > 2× (100% spread) is a near-certain collision.
+  if (grossSpreadPercent > MAX_REALISTIC_SPREAD_PERCENT) {
+    return null; // Ticker collision — not a real arbitrage opportunity
+  }
+  // ───────────────────────────────────────────────────────────────────────
 
   // Get fees
   const costs = calculateTotalCosts(buyOrderBook.exchange, sellOrderBook.exchange);
