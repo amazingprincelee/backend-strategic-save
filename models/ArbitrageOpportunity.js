@@ -32,6 +32,7 @@ const ArbitrageOpportunitySchema = new mongoose.Schema(
     sellPrice:          Number,
     confidenceScore:    Number,
     riskLevel:          String,
+    transferStatus:     { type: String, enum: ['Verified', 'Blocked', 'Unknown', 'Unverified'], default: 'Unknown' },
 
     // Peak profit seen across all scans while this opportunity was active
     peakProfitPercent:  { type: Number, default: 0 },

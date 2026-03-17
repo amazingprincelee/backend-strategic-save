@@ -291,8 +291,15 @@ export async function analyzeSymbol(symbol, timeframe = '1h', marketType = 'spot
 // Called by the server.js cron job
 
 const TOP_PAIRS_FOR_SWEEP = [
+  // Tier 1 — large caps
   'BTCUSDT', 'ETHUSDT', 'BNBUSDT', 'SOLUSDT', 'XRPUSDT',
   'ADAUSDT', 'DOGEUSDT', 'AVAXUSDT', 'LINKUSDT', 'DOTUSDT',
+  // Tier 2 — classic / high-volume alts
+  'LTCUSDT', 'SHIBUSDT', 'MATICUSDT', 'UNIUSDT', 'ATOMUSDT',
+  'NEARUSDT', 'INJUSDT', 'APTUSDT', 'OPUSDT', 'ARBUSDT',
+  // Tier 3 — established coins users requested
+  'ETCUSDT', 'BCHUSDT', 'AAVEUSDT', 'FILUSDT', 'SUIUSDT',
+  'XMRUSDT', 'TONUSDT', 'JUPUSDT', 'STXUSDT', 'GALAUSDT',
 ];
 
 /**

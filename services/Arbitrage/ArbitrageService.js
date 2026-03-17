@@ -21,6 +21,116 @@ import Notification from '../../models/Notification.js';
 import User from '../../models/User.js';
 import emailService from '../../utils/emailService.js';
 
+// ── Transfer status enrichment ─────────────────────────────────────────────
+// Cache fetchCurrencies() results per exchange (10-min TTL) to avoid hitting
+// rate limits during every scan cycle.
+const _currencyCache = new Map(); // exchangeName → { data, ts }
+const CURRENCY_CACHE_TTL = 10 * 60 * 1000;
+
+async function getExchangeCurrencies(exchangeName) {
+  const cached = _currencyCache.get(exchangeName);
+  if (cached && Date.now() - cached.ts < CURRENCY_CACHE_TTL) return cached.data;
+
+  try {
+    const exchange = exchangeManager.getExchanges()[exchangeName];
+    if (!exchange) return null;
+
+    // Prefer currencies already loaded by loadMarkets()
+    if (exchange.currencies && Object.keys(exchange.currencies).length > 0) {
+      _currencyCache.set(exchangeName, { data: exchange.currencies, ts: Date.now() });
+      return exchange.currencies;
+    }
+    // Otherwise explicitly fetch — some exchanges require a separate call
+    const currencies = await exchange.fetchCurrencies();
+    _currencyCache.set(exchangeName, { data: currencies, ts: Date.now() });
+    return currencies;
+  } catch {
+    return null;
+  }
+}
+
+function extractCoinStatus(currency) {
+  if (!currency) return { deposit: null, withdraw: null };
+  let deposit = null, withdraw = null;
+
+  if (typeof currency.deposit === 'boolean') deposit = currency.deposit;
+  if (typeof currency.withdraw === 'boolean') withdraw = currency.withdraw;
+  if (deposit === null && typeof currency.active === 'boolean') deposit = currency.active;
+  if (withdraw === null && typeof currency.active === 'boolean') withdraw = currency.active;
+
+  const info = currency.info || {};
+  if (deposit === null) {
+    const v = info.depositEnable ?? info.isDepositEnabled ?? info.deposit_enabled ??
+              info.canDeposit ?? info.enableDeposit ?? info.open_chain_deposit ?? null;
+    if (v != null) deposit = v === true || v === 'true' || v === 1 || v === '1';
+  }
+  if (withdraw === null) {
+    const v = info.withdrawEnable ?? info.isWithdrawEnabled ?? info.withdraw_enabled ??
+              info.canWithdraw ?? info.enableWithdraw ?? info.open_chain_withdraw ?? null;
+    if (v != null) withdraw = v === true || v === 'true' || v === 1 || v === '1';
+  }
+
+  if ((deposit === null || withdraw === null) && currency.networks) {
+    const nets = Object.values(currency.networks);
+    if (nets.length > 0) {
+      if (deposit === null)  deposit  = nets.some(n => n.deposit === true  || n.active === true);
+      if (withdraw === null) withdraw = nets.some(n => n.withdraw === true || n.active === true);
+    }
+  }
+  return { deposit, withdraw };
+}
+
+/**
+ * Enrich opportunities with transfer status.
+ * Key for arbitrage: can we WITHDRAW base from the buy exchange and DEPOSIT it to the sell exchange?
+ * Quote currency (USDT) stays on each exchange separately — no transfer needed.
+ */
+async function enrichTransferStatus(opportunities) {
+  if (!opportunities.length) return opportunities;
+
+  // Collect unique exchange names
+  const exchangeNames = new Set(opportunities.flatMap(o => [o.buyExchange, o.sellExchange]));
+
+  // Fetch currencies for all exchanges in parallel (cached)
+  const currencyMap = {};
+  await Promise.all([...exchangeNames].map(async name => {
+    currencyMap[name] = await getExchangeCurrencies(name);
+  }));
+
+  for (const opp of opportunities) {
+    const baseCoin = opp.symbol.split('/')[0];
+    const buyCurs  = currencyMap[opp.buyExchange];
+    const sellCurs = currencyMap[opp.sellExchange];
+
+    const buyStatus  = extractCoinStatus(buyCurs?.[baseCoin]);
+    const sellStatus = extractCoinStatus(sellCurs?.[baseCoin]);
+
+    // Arbitrage transfer: withdraw from buy exchange + deposit to sell exchange
+    const canWithdraw = buyStatus.withdraw;
+    const canDeposit  = sellStatus.deposit;
+
+    if (canWithdraw === true && canDeposit === true) {
+      opp.transferStatus = 'Verified';
+    } else if (canWithdraw === false || canDeposit === false) {
+      opp.transferStatus = 'Blocked';
+    } else {
+      // Unknown — either API doesn't expose status or coin not in currency list
+      // If coin is not found in currency list at all, flag it
+      const notOnBuy  = buyCurs  && !buyCurs[baseCoin];
+      const notOnSell = sellCurs && !sellCurs[baseCoin];
+      opp.transferStatus = (notOnBuy || notOnSell) ? 'Unverified' : 'Unknown';
+    }
+
+    opp._transferDetails = {
+      buyCanWithdraw:  canWithdraw,
+      sellCanDeposit:  canDeposit,
+      coinOnBuyExchange:  buyCurs  ? !!buyCurs[baseCoin]  : null,
+      coinOnSellExchange: sellCurs ? !!sellCurs[baseCoin] : null,
+    };
+  }
+  return opportunities;
+}
+
 const ALERT_THRESHOLD_PERCENT = 0.20; // minimum net profit % to store + email + in-app notification
 // At most one digest email per user every 12 hours (= max 2/day).
 // All current opportunities are batched into a single email — no per-opportunity spam.
@@ -162,6 +272,7 @@ async function processSignificantOpportunities(opportunities) {
           sellPrice:           opp.sellPrice,
           confidenceScore:     opp.confidenceScore,
           riskLevel:           opp.riskLevel,
+          transferStatus:      opp.transferStatus || 'Unknown',
           peakProfitPercent:   opp.netProfitPercent,
           status:              'active',
           firstDetectedAt:     now,
@@ -181,6 +292,7 @@ async function processSignificantOpportunities(opportunities) {
           sellPrice:           opp.sellPrice,
           confidenceScore:     opp.confidenceScore,
           riskLevel:           opp.riskLevel,
+          transferStatus:      opp.transferStatus || 'Unknown',
           peakProfitPercent:   Math.max(existing.peakProfitPercent || 0, opp.netProfitPercent),
           status:              'active',
           firstDetectedAt:     now,
@@ -201,6 +313,7 @@ async function processSignificantOpportunities(opportunities) {
           sellPrice:           opp.sellPrice,
           confidenceScore:     opp.confidenceScore,
           riskLevel:           opp.riskLevel,
+          transferStatus:      opp.transferStatus || 'Unknown',
           peakProfitPercent:   Math.max(existing.peakProfitPercent || 0, opp.netProfitPercent),
           lastSeenAt:          now,
         });
@@ -354,7 +467,10 @@ async function performScan(userPreferences = null) {
     clearOrderBookCache();
 
     // Perform the scan in batches
-    const opportunities = await processBatches(symbols, scanConfig);
+    const rawOpportunities = await processBatches(symbols, scanConfig);
+
+    // Enrich with transfer status (deposit/withdraw per exchange)
+    const opportunities = await enrichTransferStatus(rawOpportunities);
 
     // Update cache
     cachedOpportunities = opportunities;
