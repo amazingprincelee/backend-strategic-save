@@ -272,8 +272,8 @@ export const analyzeSignal = async (req, res) => {
     if (!sym.endsWith('USDT')) {
       return res.status(400).json({ success: false, message: 'Only USDT pairs are supported (e.g. BTCUSDT)' });
     }
-    if (!['15m', '1h'].includes(timeframe)) {
-      return res.status(400).json({ success: false, message: 'Supported timeframes: 15m, 1h' });
+    if (!['15m', '1h', '4h', '1d'].includes(timeframe)) {
+      return res.status(400).json({ success: false, message: 'Supported timeframes: 15m, 1h, 4h, 1d' });
     }
     if (!['spot', 'futures'].includes(marketType)) {
       return res.status(400).json({ success: false, message: 'marketType must be "spot" or "futures"' });

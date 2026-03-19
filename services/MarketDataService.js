@@ -33,6 +33,8 @@ const CANDLE_LIMITS = {
   '5m':  120,
   '15m': 120,
   '1h':  260,  // covers EMA200 warmup
+  '4h':  260,  // covers EMA200 warmup
+  '1d':  260,  // covers EMA200 warmup
 };
 
 // Cache TTL per timeframe
@@ -41,6 +43,8 @@ const CACHE_TTL = {
   '5m':  4  * 60_000,
   '15m': 14 * 60_000,
   '1h':  55 * 60_000,
+  '4h':  3  * 60 * 60_000 + 55 * 60_000,  // 3h 55min
+  '1d':  23 * 60 * 60_000 + 55 * 60_000,  // 23h 55min
 };
 
 const FUNDING_CACHE_TTL = 5 * 60_000;
@@ -137,7 +141,7 @@ async function fetchFromGateio(symbol, timeframe, limit, marketType) {
 const KUCOIN_KLINES_URL = 'https://api.kucoin.com/api/v1/market/candles';
 
 const KUCOIN_TF = {
-  '1m': '1min', '5m': '5min', '15m': '15min', '30m': '30min', '1h': '1hour',
+  '1m': '1min', '5m': '5min', '15m': '15min', '30m': '30min', '1h': '1hour', '4h': '4hour', '1d': '1day',
 };
 
 function toKucoinSymbol(symbol) {
@@ -150,7 +154,7 @@ async function fetchFromKucoin(symbol, timeframe, limit) {
 
   // KuCoin doesn't accept a 'limit' param; use startAt/endAt window
   const endAt   = Math.floor(Date.now() / 1000);
-  const tfSec   = { '1min': 60, '5min': 300, '15min': 900, '30min': 1800, '1hour': 3600 };
+  const tfSec   = { '1min': 60, '5min': 300, '15min': 900, '30min': 1800, '1hour': 3600, '4hour': 14400, '1day': 86400 };
   const startAt = endAt - (limit * (tfSec[type] ?? 3600)) - 3600; // small buffer
 
   const { data } = await httpExt.get(KUCOIN_KLINES_URL, {

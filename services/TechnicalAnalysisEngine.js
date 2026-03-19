@@ -95,7 +95,7 @@ function calcATR(candles, period = 14) {
  * Analyse a single symbol and return a trading signal or a neutral result.
  *
  * @param {string} symbol     e.g. 'BTCUSDT'
- * @param {string} timeframe  '15m' | '1h'
+ * @param {string} timeframe  '15m' | '1h' | '4h' | '1d'
  * @param {string} marketType 'spot' | 'futures'
  * @returns {Promise<object>} signal result
  */
