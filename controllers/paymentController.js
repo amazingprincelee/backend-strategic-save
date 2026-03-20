@@ -5,6 +5,7 @@
 
 import User from '../models/User.js';
 import Subscription from '../models/Subscription.js';
+import Transaction from '../models/Transaction.js';
 import { getSettings } from '../models/AppSettings.js';
 import coinbase  from '../services/payment/CoinbaseCommerceService.js';
 import nowpay   from '../services/payment/NOWPaymentsService.js';
@@ -69,6 +70,23 @@ export const createCheckout = async (req, res) => {
       creditsApplied: creditsToApply,
       status:    'pending',
     });
+
+    // ── Track transaction ──────────────────────────────────────────────────
+    const txn = await Transaction.create({
+      userId:      user._id,
+      userEmail:   user.email,
+      userName:    user.fullName || user.email,
+      plan:        'premium',
+      planDurationDays: settings.premiumDurationDays || 30,
+      amountUSD,
+      provider:    settings.activePaymentProvider,
+      chargeId:    charge.chargeId,
+      checkoutUrl: charge.paymentUrl,
+      status:      'initiated',
+      ipAddress:   req.ip || req.headers['x-forwarded-for'],
+      events: [{ status: 'initiated', message: 'Checkout created — user redirected to payment page' }],
+    });
+    console.log(`[Transaction] ${txn._id} initiated — ${user.email} — $${amountUSD}`);
 
     res.json({ success: true, data: { paymentUrl: charge.paymentUrl, provider: settings.activePaymentProvider } });
   } catch (err) {
@@ -165,6 +183,12 @@ async function activatePremiumInternal(userId, chargeId, provider, webhookPayloa
     );
   } catch (_) { /* non-critical */ }
 
+  // ── Update transaction to completed ───────────────────────────────────────
+  try {
+    const txn = await Transaction.findOne({ chargeId, userId });
+    if (txn) await txn.addEvent('completed', `Premium activated until ${newExpiry.toDateString()}`, webhookPayload ? { provider } : null);
+  } catch (_) { /* non-critical */ }
+
   console.log(`[Payment] Activated premium for user ${userId} until ${newExpiry.toDateString()}`);
   return { user: await User.findById(userId), newExpiry };
 }
@@ -175,7 +199,20 @@ export const coinbaseWebhook = async (req, res) => {
     const signature = req.headers['x-cc-webhook-signature'];
     const event = coinbase.verifyWebhook(req.rawBody, signature);
 
-    // Only act on 'charge:confirmed' or 'charge:resolved'
+    // Track all webhook events on the transaction
+    if (event.chargeId) {
+      try {
+        const txn = await Transaction.findOne({ chargeId: event.chargeId });
+        if (txn) {
+          const statusMap = { 'charge:pending': 'pending', 'charge:confirmed': 'processing', 'charge:resolved': 'completed', 'charge:failed': 'failed', 'charge:expired': 'expired' };
+          const mapped = statusMap[event.event];
+          if (mapped && txn.status !== 'completed') {
+            await txn.addEvent(mapped, `Coinbase webhook: ${event.event}`, { event: event.event });
+          }
+        }
+      } catch (_) { /* non-critical */ }
+    }
+
     if (!['charge:confirmed', 'charge:resolved'].includes(event.event)) {
       return res.json({ received: true });
     }
@@ -195,6 +232,18 @@ export const nowpaymentsWebhook = async (req, res) => {
     const signature = req.headers['x-nowpayments-sig'];
     const event = nowpay.verifyWebhook(req.rawBody, signature);
 
+    // Track webhook event
+    if (event.chargeId) {
+      try {
+        const txn = await Transaction.findOne({ chargeId: event.chargeId });
+        if (txn) {
+          const statusMap = { waiting: 'pending', confirming: 'processing', confirmed: 'processing', sending: 'processing', finished: 'completed', failed: 'failed', expired: 'expired' };
+          const mapped = statusMap[event.status] || 'pending';
+          if (txn.status !== 'completed') await txn.addEvent(mapped, `NOWPayments webhook: ${event.status}`, { status: event.status });
+        }
+      } catch (_) { /* non-critical */ }
+    }
+
     if (event.status !== 'finished') return res.json({ received: true });
     if (!event.userId) return res.status(400).json({ error: 'Missing userId' });
 
@@ -211,6 +260,18 @@ export const cryptopayWebhook = async (req, res) => {
   try {
     const signature = req.headers['x-cryptopay-signature'];
     const event = cryptopay.verifyWebhook(req.rawBody, signature);
+
+    // Track webhook event
+    if (event.chargeId) {
+      try {
+        const txn = await Transaction.findOne({ chargeId: event.chargeId });
+        if (txn) {
+          const statusMap = { new: 'pending', pending: 'pending', unresolved: 'processing', resolved: 'processing', completed: 'completed', cancelled: 'failed', expired: 'expired' };
+          const mapped = statusMap[event.status] || 'pending';
+          if (txn.status !== 'completed') await txn.addEvent(mapped, `CryptoPay webhook: ${event.status}`, { status: event.status });
+        }
+      } catch (_) { /* non-critical */ }
+    }
 
     if (event.status !== 'completed') return res.json({ received: true });
     if (!event.userId) return res.status(400).json({ error: 'Missing userId' });

@@ -18,6 +18,7 @@ import {
   getActiveAnnouncement,
 } from '../controllers/adminController.js';
 import { adminActivatePremium } from '../controllers/paymentController.js';
+import { listTransactions, getTransactionStats, getTransactionDetail } from '../controllers/transactionController.js';
 import Subscription from '../models/Subscription.js';
 import AppSettings, { getSettings } from '../models/AppSettings.js';
 import { authenticate, requireAdmin } from '../middleware/auth.js';
@@ -196,5 +197,10 @@ router.put('/payment-keys', adminActionLimiter, async (req, res) => {
 
 // Announcement
 router.put('/announcement', adminActionLimiter, updateAnnouncement);
+
+// Transactions
+router.get('/transactions',       adminLimiter, listTransactions);
+router.get('/transactions/stats', adminLimiter, getTransactionStats);
+router.get('/transactions/:id',   adminLimiter, getTransactionDetail);
 
 export default router;
