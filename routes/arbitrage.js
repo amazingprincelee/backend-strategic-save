@@ -10,6 +10,11 @@ import {
   getPastOpportunities,
   getPastOpportunitiesSummary,
 } from '../controllers/arbitragecontroller.js';
+import {
+  getTriangularOpportunities,
+  getTriangularHistory,
+  getTriangularSummary,
+} from '../controllers/triangularArbitrageController.js';
 
 const router = express.Router();
 
@@ -37,5 +42,10 @@ router.put('/exchanges', updateEnabledExchanges);
 
 // Manual refresh (use sparingly - optional endpoint)
 router.post('/refresh', refreshArbitrageOpportunities);
+
+// ── Triangular Arbitrage ──────────────────────────────────────────────────────
+router.get('/triangular',         optionalAuth, getTriangularOpportunities);
+router.get('/triangular/history', optionalAuth, getTriangularHistory);
+router.get('/triangular/summary', getTriangularSummary);
 
 export default router;

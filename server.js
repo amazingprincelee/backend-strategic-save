@@ -34,6 +34,8 @@ import alphaRoutes       from './routes/alpha.js';
 import emailService from './utils/emailService.js';
 // New Order Book-based Arbitrage Service
 import { initializeBackgroundScan } from './services/Arbitrage/ArbitrageService.js';
+// Triangular Arbitrage Scanner
+import { initializeTriangularScanner, runTriangularScan } from './services/Arbitrage/TriangularArbitrageScanner.js';
 // Bot Trading Engine
 import botEngine from './services/bot/BotEngine.js';
 import BotConfig from './models/bot/BotConfig.js';
@@ -277,6 +279,19 @@ const startServer = async () => {
       io,
     });
     console.log('✅ Order Book Arbitrage Service initialized');
+
+    // Initialize Triangular Arbitrage Scanner
+    console.log('🔺 Initializing Triangular Arbitrage Scanner...');
+    try {
+      await initializeTriangularScanner(io);
+      // Schedule scan every 2 minutes (triangular windows are short)
+      cron.schedule('*/2 * * * *', async () => {
+        try { await runTriangularScan(io); } catch (e) { console.warn('[TriArb] Cron error:', e.message); }
+      });
+      console.log('✅ Triangular Arbitrage Scanner initialized (scanning every 2 min)');
+    } catch (triErr) {
+      console.warn('⚠️  Triangular Arbitrage Scanner init warning:', triErr.message);
+    }
 
     // Initialize Hybrid Signal Engine (AI + rules + multi-TF)
     console.log('🧠 Initializing Hybrid Signal Engine...');
