@@ -372,7 +372,7 @@ export const executeSignal = async (req, res) => {
  */
 export const quickExecute = async (req, res) => {
   try {
-    const { signalData, botId, exchangeAccountId, accountBalance, riskPreset = 'moderate' } = req.body;
+    const { signalData, botId, exchangeAccountId, isDemo, exchange: demoExchange, accountBalance, riskPreset = 'moderate' } = req.body;
     if (!signalData || !signalData.pair || !signalData.entry) {
       return res.status(400).json({ success: false, message: 'Signal data is required' });
     }
@@ -386,15 +386,45 @@ export const quickExecute = async (req, res) => {
       // Use existing bot
       bot = await BotConfig.findOne({ _id: botId, userId: req.user.id });
       if (!bot) return res.status(404).json({ success: false, message: 'Bot not found' });
+    } else if (isDemo) {
+      // Demo mode — no exchange account needed, just exchange name for price data
+      if (!demoExchange) {
+        return res.status(400).json({ success: false, message: 'Exchange is required for demo mode' });
+      }
+      bot = await BotConfig.create({
+        userId:           req.user.id,
+        name:             `Quick Trade — ${signalData.pair}`,
+        isDemo:           true,
+        exchange:         demoExchange,
+        symbol:           signalData.pair.replace('/', ''),
+        marketType:       signalData.marketType || 'futures',
+        strategyId:       'smart_signal',
+        executionMode:    'auto',
+        cooldownMinutes:  0,
+        capitalAllocation: {
+          totalCapital:    accountBalance || 10000,
+          maxOpenPositions: 1,
+        },
+        strategyParams: {
+          riskPerTrade:        riskPct,
+          maxConcurrentTrades: 1,
+          leverage:            signalData.leverage || 1,
+        },
+        riskParams: { dailyLossLimitPercent: 5 },
+        status: 'running',
+        startedAt: new Date(),
+        'stats.startingCapital': accountBalance || 10000,
+        'stats.currentCapital':  accountBalance || 10000,
+        'stats.peakCapital':     accountBalance || 10000,
+      });
     } else {
-      // Resolve exchange from account
+      // Live mode — resolve exchange from account
       if (!exchangeAccountId) {
-        return res.status(400).json({ success: false, message: 'Exchange account is required' });
+        return res.status(400).json({ success: false, message: 'Exchange account is required for live trading' });
       }
       const account = await ExchangeAccount.findOne({ _id: exchangeAccountId, userId: req.user.id });
       if (!account) return res.status(404).json({ success: false, message: 'Exchange account not found' });
 
-      // Create a lightweight single-trade executor bot
       bot = await BotConfig.create({
         userId:           req.user.id,
         name:             `Quick Trade — ${signalData.pair}`,
