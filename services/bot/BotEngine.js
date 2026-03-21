@@ -148,22 +148,22 @@ class BotEngine {
                   livePrice = ticker.lastPrice || pso.entry;
                 } catch { /* use stored entry price as fallback */ }
 
+                const direction  = (pso.direction || 'LONG').toUpperCase();
+                const positionSide = direction === 'SHORT' ? 'short' : 'long';
+                const leverage   = bot.strategyParams?.leverage || 1;
                 const buySignal = {
-                  action:          'buy',
-                  symbol:          tradeSymbol,
-                  type:            pso.direction,
-                  entryPrice:      livePrice,
+                  portionIndex:    0,
+                  side:            positionSide,
                   stopLossPrice:   pso.stopLoss,
                   takeProfitPrice: pso.takeProfit,
-                  amount:          bot.capitalAllocation.totalCapital / livePrice,
-                  confidence:      pso.confidenceScore ?? 0.7,
-                  reasons:         pso.reasons || ['User-selected signal from setup'],
+                  amount:          (bot.capitalAllocation.totalCapital * leverage) / livePrice,
+                  triggerReason:   'entry',
                 };
                 const { position } = await orderManager.openPosition(bot, buySignal, tradeSymbol);
                 this._emitTrade(bot, 'buy', position.entryPrice, buySignal.amount, position._id, null, tradeSymbol);
                 console.log(`[BotEngine] Executed pre-selected signal for bot ${botId}: ${tradeSymbol} @ $${livePrice}`);
               } catch (psErr) {
-                console.error(`[BotEngine] Pre-selected signal execution failed:`, psErr.message);
+                console.error(`[BotEngine] Pre-selected signal execution failed:`, psErr.message, psErr.errors || '');
               }
             }
           }
