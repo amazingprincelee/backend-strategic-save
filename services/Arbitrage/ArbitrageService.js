@@ -19,7 +19,6 @@ import { clearOrderBookCache, getOrderBookCacheStats } from './OrderBookService.
 import ArbitrageOpportunity from '../../models/ArbitrageOpportunity.js';
 import Notification from '../../models/Notification.js';
 import User from '../../models/User.js';
-import emailService from '../../utils/emailService.js';
 
 // ── Transfer status enrichment ─────────────────────────────────────────────
 // Cache fetchCurrencies() results per exchange (10-min TTL) to avoid hitting
@@ -214,11 +213,7 @@ async function enrichTransferStatus(opportunities) {
   return valid;
 }
 
-const ALERT_THRESHOLD_PERCENT = 0.20; // minimum net profit % to store + email + in-app notification
-// At most one digest email per user every 12 hours (= max 2/day).
-// All current opportunities are batched into a single email — no per-opportunity spam.
-const DIGEST_COOLDOWN_MS = 12 * 60 * 60 * 1000;
-const _userEmailCooldown = new Map(); // userId (string) → last email timestamp (ms)
+const ALERT_THRESHOLD_PERCENT = 0.20; // minimum net profit % to store + in-app notification
 
 // Cache for storing opportunities
 let cachedOpportunities = [];
@@ -409,38 +404,9 @@ async function processSignificantOpportunities(opportunities) {
       { status: 'cleared', clearedAt: now }
     );
 
-    // ── 3. Digest email — at most twice/day per user, all opportunities batched ──
-    if (significant.length > 0) {
-      const now = Date.now();
-
-      // Only users who have explicitly opted in (default is OFF)
-      const users = await User.find({
-        isActive: true,
-        email: { $exists: true, $ne: '' },
-        role: { $in: ['premium', 'admin'] },
-        'preferences.emailNotifications.arbitrageAlert': true,
-      }).select('_id email fullName').lean();
-
-      const usersToEmail = users.filter(u => {
-        const lastSent = _userEmailCooldown.get(u._id.toString());
-        return !lastSent || (now - lastSent) >= DIGEST_COOLDOWN_MS;
-      });
-
-      if (usersToEmail.length > 0) {
-        // Send ONE email per user with ALL current opportunities batched
-        await emailService.sendArbitrageAlert(usersToEmail, significant);
-        for (const u of usersToEmail) _userEmailCooldown.set(u._id.toString(), now);
-        console.log(`[Arbitrage] Digest email sent to ${usersToEmail.length} user(s) — ${significant.length} opportunit${significant.length === 1 ? 'y' : 'ies'} batched`);
-      } else if (users.length > 0) {
-        console.log('[Arbitrage] Digest skipped — all opted-in users within 12-hour cooldown');
-      } else {
-        console.log('[Arbitrage] No users with arbitrage email alerts enabled');
-      }
-
-      // In-app notifications only for brand-new / returned opportunities
-      if (newOpportunities.length > 0) {
-        await emitArbitrageNotifications(newOpportunities);
-      }
+    // ── 3. In-app notifications for brand-new / returned opportunities ──
+    if (significant.length > 0 && newOpportunities.length > 0) {
+      await emitArbitrageNotifications(newOpportunities);
     }
 
     if (significant.length > 0) {
