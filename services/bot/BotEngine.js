@@ -125,10 +125,54 @@ class BotEngine {
         return;
       }
 
-      // Fetch OHLCV candles
       const timeframe  = TIMEFRAME_MAP[bot.strategyId] || '1h';
       const intervalMs = TICK_INTERVAL_MS[timeframe]   || 3_600_000;
       const isMultiPair = bot.symbol === 'MULTI';
+
+      // ── Execute pre-selected signal from manual setup (before candle fetch) ──
+      const pso = bot.pendingSignalOverride;
+      if (pso) {
+        const now = new Date();
+        const expired = pso.expiresAt && new Date(pso.expiresAt) <= now;
+        if (!expired) {
+          const openPositions0 = await Position.find({ botId: bot._id, status: 'open' });
+          if (openPositions0.length === 0) {
+            const riskCheck = await riskEngine.checkCanOpenPosition(bot, 0);
+            if (riskCheck.allowed) {
+              try {
+                const tradeSymbol = (pso.pair || bot.symbol).replace('/', '');
+                // Fetch live price for the signal's pair
+                let livePrice = pso.entry;
+                try {
+                  const ticker = await marketDataService.fetchTicker(tradeSymbol, bot.marketType || 'spot');
+                  livePrice = ticker.lastPrice || pso.entry;
+                } catch { /* use stored entry price as fallback */ }
+
+                const buySignal = {
+                  action:          'buy',
+                  symbol:          tradeSymbol,
+                  type:            pso.direction,
+                  entryPrice:      livePrice,
+                  stopLossPrice:   pso.stopLoss,
+                  takeProfitPrice: pso.takeProfit,
+                  amount:          bot.capitalAllocation.totalCapital / livePrice,
+                  confidence:      pso.confidenceScore ?? 0.7,
+                  reasons:         pso.reasons || ['User-selected signal from setup'],
+                };
+                const { position } = await orderManager.openPosition(bot, buySignal, tradeSymbol);
+                this._emitTrade(bot, 'buy', position.entryPrice, buySignal.amount, position._id, null, tradeSymbol);
+                console.log(`[BotEngine] Executed pre-selected signal for bot ${botId}: ${tradeSymbol} @ $${livePrice}`);
+              } catch (psErr) {
+                console.error(`[BotEngine] Pre-selected signal execution failed:`, psErr.message);
+              }
+            }
+          }
+        }
+        // Always clear after first attempt (success or fail or expired)
+        await BotConfig.findByIdAndUpdate(botId, { $unset: { pendingSignalOverride: '' } });
+      }
+
+      // Fetch OHLCV candles
 
       let candles      = [];
       let currentPrice = null;
@@ -196,35 +240,6 @@ class BotEngine {
       // Re-fetch with updated stats
       bot = await BotConfig.findById(botId);
 
-      // ── Check for pre-selected pending signal (manual mode setup) ────────
-      const now = new Date();
-      const pso = bot.pendingSignalOverride;
-      if (pso && openPositions.length === 0 && (!pso.expiresAt || new Date(pso.expiresAt) > now)) {
-        const riskCheck = await riskEngine.checkCanOpenPosition(bot, 0);
-        if (riskCheck.allowed) {
-          try {
-            const tradeSymbol = (pso.pair || bot.symbol).replace('/', '');
-            const buySignal = {
-              action:          'buy',
-              symbol:          tradeSymbol,
-              type:            pso.direction,
-              entryPrice:      currentPrice,  // use live price, not stale entry
-              stopLossPrice:   pso.stopLoss,
-              takeProfitPrice: pso.takeProfit,
-              amount:          bot.capitalAllocation.totalCapital / currentPrice,
-              confidence:      pso.confidenceScore ?? 0.7,
-              reasons:         pso.reasons || ['User-selected signal from setup'],
-            };
-            const { position } = await orderManager.openPosition(bot, buySignal, tradeSymbol);
-            this._emitTrade(bot, 'buy', position.entryPrice, buySignal.amount, position._id, null, tradeSymbol);
-            console.log(`[BotEngine] Executed pre-selected signal for bot ${botId}: ${tradeSymbol}`);
-          } catch (psErr) {
-            console.error(`[BotEngine] Pre-selected signal execution failed:`, psErr.message);
-          }
-        }
-        // Clear after attempt so it never retries
-        await BotConfig.findByIdAndUpdate(botId, { $unset: { pendingSignalOverride: '' } });
-      }
 
       // Run strategy
       const strategy = STRATEGY_MAP[bot.strategyId];
