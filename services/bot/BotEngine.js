@@ -1,5 +1,6 @@
 import BotConfig from '../../models/bot/BotConfig.js';
 import Position from '../../models/bot/Position.js';
+import Trade from '../../models/bot/Trade.js';
 import Notification from '../../models/Notification.js';
 import orderManager from './OrderManager.js';
 import riskEngine from './RiskEngine.js';
@@ -132,44 +133,103 @@ class BotEngine {
       // ── Execute pre-selected signal from manual setup (before candle fetch) ──
       const pso = bot.pendingSignalOverride;
       if (pso) {
-        const now = new Date();
-        const expired = pso.expiresAt && new Date(pso.expiresAt) <= now;
-        if (!expired) {
-          const openPositions0 = await Position.find({ botId: bot._id, status: 'open' });
-          if (openPositions0.length === 0) {
-            const riskCheck = await riskEngine.checkCanOpenPosition(bot, 0);
-            if (riskCheck.allowed) {
-              try {
-                const tradeSymbol = (pso.pair || bot.symbol).replace('/', '');
-                // Fetch live price for the signal's pair
-                let livePrice = pso.entry;
-                try {
-                  const ticker = await marketDataService.fetchTicker(tradeSymbol, bot.marketType || 'spot');
-                  livePrice = ticker.lastPrice || pso.entry;
-                } catch { /* use stored entry price as fallback */ }
-
-                const direction  = (pso.direction || 'LONG').toUpperCase();
-                const positionSide = direction === 'SHORT' ? 'short' : 'long';
-                const leverage   = bot.strategyParams?.leverage || 1;
-                const buySignal = {
-                  portionIndex:    0,
-                  side:            positionSide,
-                  stopLossPrice:   pso.stopLoss,
-                  takeProfitPrice: pso.takeProfit,
-                  amount:          (bot.capitalAllocation.totalCapital * leverage) / livePrice,
-                  triggerReason:   'entry',
-                };
-                const { position } = await orderManager.openPosition(bot, buySignal, tradeSymbol);
-                this._emitTrade(bot, 'buy', position.entryPrice, buySignal.amount, position._id, null, tradeSymbol);
-                console.log(`[BotEngine] Executed pre-selected signal for bot ${botId}: ${tradeSymbol} @ $${livePrice}`);
-              } catch (psErr) {
-                console.error(`[BotEngine] Pre-selected signal execution failed:`, psErr.message, psErr.errors || '');
-              }
-            }
-          }
-        }
-        // Always clear after first attempt (success or fail or expired)
+        // Always clear first — prevents re-execution on next tick if anything fails
         await BotConfig.findByIdAndUpdate(botId, { $unset: { pendingSignalOverride: '' } });
+
+        const expired = pso.expiresAt && new Date(pso.expiresAt) <= new Date();
+        const alreadyOpen = await Position.countDocuments({ botId: bot._id, status: 'open' });
+
+        if (!expired && alreadyOpen === 0) {
+          try {
+            const tradeSymbol  = (pso.pair || bot.symbol).replace('/', '');
+            const direction    = (pso.direction || 'LONG').toUpperCase();
+            const isShort      = direction === 'SHORT';
+            const positionSide = isShort ? 'short' : 'long';
+            const leverage     = bot.strategyParams?.leverage || 1;
+            const marketType   = bot.marketType || 'spot';
+
+            // 1. Get live price
+            let livePrice = pso.entry;
+            try {
+              const ticker = await marketDataService.fetchTicker(tradeSymbol, marketType);
+              if (ticker?.lastPrice) livePrice = ticker.lastPrice;
+            } catch { /* fall back to stored entry price */ }
+
+            if (!livePrice || livePrice <= 0) throw new Error('Could not determine entry price');
+
+            // 2. Calculate amount
+            const amount = (bot.capitalAllocation.totalCapital * leverage) / livePrice;
+            const TAKER_FEE = 0.001;
+            const cost      = livePrice * amount;
+            const feeCost   = cost * TAKER_FEE;
+
+            // 3. Update demo balance for LONG entries (shorts have no upfront cost)
+            if (bot.isDemo && !isShort) {
+              const DemoAccount = (await import('../../models/DemoAccount.js')).default;
+              const demoAcct = await DemoAccount.findOne({ userId: bot.userId });
+              if (!demoAcct) throw new Error('Demo account not found');
+              if (demoAcct.virtualBalance < cost + feeCost) throw new Error('Insufficient demo balance');
+              demoAcct.virtualBalance  -= (cost + feeCost);
+              demoAcct.totalFeesPaid   += feeCost;
+              demoAcct.totalTrades     += 1;
+              await demoAcct.save();
+            }
+
+            // 4. Create Trade record
+            const trade = await Trade.create({
+              botId:        bot._id,
+              userId:       bot.userId,
+              isDemo:       bot.isDemo,
+              exchange:     bot.exchange,
+              symbol:       tradeSymbol,
+              side:         isShort ? 'sell' : 'buy',
+              type:         'market',
+              price:        livePrice,
+              amount,
+              cost,
+              fee:          feeCost,
+              status:       'closed',
+              portionIndex: 0,
+              triggerReason: 'entry',
+            });
+
+            // 5. Create Position record
+            const position = await Position.create({
+              botId:          bot._id,
+              userId:         bot.userId,
+              isDemo:         bot.isDemo,
+              exchange:       bot.exchange,
+              symbol:         tradeSymbol,
+              portionIndex:   0,
+              side:           positionSide,
+              entryPrice:     livePrice,
+              amount,
+              cost,
+              entryFee:       feeCost,
+              stopLossPrice:  pso.stopLoss  || (isShort ? livePrice * 1.05 : livePrice * 0.95),
+              takeProfitPrice:pso.takeProfit || (isShort ? livePrice * 0.90 : livePrice * 1.10),
+              remainingAmount:amount,
+              currentPrice:   livePrice,
+              status:         'open',
+            });
+
+            // 6. Link trade → position
+            await Trade.findByIdAndUpdate(trade._id, { positionId: position._id });
+
+            // 7. Update bot stats
+            await BotConfig.findByIdAndUpdate(bot._id, {
+              $inc: { 'stats.totalTrades': 1 },
+              'stats.lastTradeAt': new Date(),
+            });
+
+            this._emitTrade(bot, isShort ? 'sell' : 'buy', livePrice, amount, position._id, null, tradeSymbol);
+            console.log(`[BotEngine] PSO executed: ${tradeSymbol} ${direction} @ $${livePrice} (pos: ${position._id})`);
+          } catch (psErr) {
+            console.error(`[BotEngine] PSO execution failed for bot ${botId}:`, psErr.message);
+          }
+        } else if (expired) {
+          console.log(`[BotEngine] PSO expired for bot ${botId}, skipping`);
+        }
       }
 
       // Fetch OHLCV candles
