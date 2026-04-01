@@ -224,13 +224,13 @@ let scanConfig = null;
 let _io = null; // Socket.IO instance (set by initializeBackgroundScan)
 
 // Configuration
-// Scan every 5 minutes.  Each pair requires one order-book API call per
-// exchange (5 exchanges × 80 pairs = 400 calls).  Batched at 5 pairs/batch
-// with CCXT rate-limiting; typically completes in 2-4 minutes.
-const UPDATE_INTERVAL  = 5 * 60 * 1000; // 5 minutes
-const BATCH_SIZE       = 5;             // pairs per batch
-const BATCH_DELAY_MS   = 500;           // ms between batches (CCXT handles rate-limits itself)
-const MAX_PAIRS_PER_SCAN = 110;         // scan full list — small-caps have the widest spreads
+// Scan every 15 minutes.  Each pair requires one order-book API call per
+// exchange (5 exchanges × 50 pairs = 250 calls).  Batched at 5 pairs/batch
+// with CCXT rate-limiting; typically completes in 1-2 minutes.
+const UPDATE_INTERVAL  = 15 * 60 * 1000; // 15 minutes
+const BATCH_SIZE       = 5;              // pairs per batch
+const BATCH_DELAY_MS   = 500;            // ms between batches (CCXT handles rate-limits itself)
+const MAX_PAIRS_PER_SCAN = 50;           // top pairs — sufficient coverage, lower memory footprint
 
 // Statistics
 let serviceStats = {

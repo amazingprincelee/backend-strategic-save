@@ -284,11 +284,11 @@ const startServer = async () => {
     console.log('🔺 Initializing Triangular Arbitrage Scanner...');
     try {
       await initializeTriangularScanner(io);
-      // Schedule scan every 2 minutes (triangular windows are short)
-      cron.schedule('*/2 * * * *', async () => {
+      // Schedule scan every 10 minutes
+      cron.schedule('*/10 * * * *', async () => {
         try { await runTriangularScan(io); } catch (e) { console.warn('[TriArb] Cron error:', e.message); }
       });
-      console.log('✅ Triangular Arbitrage Scanner initialized (scanning every 2 min)');
+      console.log('✅ Triangular Arbitrage Scanner initialized (scanning every 10 min)');
     } catch (triErr) {
       console.warn('⚠️  Triangular Arbitrage Scanner init warning:', triErr.message);
     }
