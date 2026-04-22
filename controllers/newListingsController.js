@@ -1,6 +1,9 @@
 // Simple in-memory cache — avoids hammering CoinGecko / GeckoTerminal free tiers
 const cache = new Map();
 
+const CG_BASE    = 'https://api.coingecko.com/api/v3';
+const CG_HEADERS = { Accept: 'application/json' };
+
 function getCached(key) {
   const entry = cache.get(key);
   if (!entry || Date.now() - entry.ts > entry.ttl) { cache.delete(key); return null; }
@@ -22,24 +25,41 @@ export const getCEXListings = async (req, res) => {
     let data = getCached(cacheKey);
 
     if (!data) {
-      // Step 1: newest coins added to CoinGecko
-      const newCoinsRes = await fetch('https://api.coingecko.com/api/v3/coins/list/new', {
-        headers: { Accept: 'application/json' },
-      });
-      if (!newCoinsRes.ok) throw new Error(`CoinGecko /list/new → ${newCoinsRes.status}`);
-      const newCoins = await newCoinsRes.json();
+      // Try the dedicated new-listings endpoint first
+      const newCoinsRes = await fetch(`${CG_BASE}/coins/list/new`, { headers: CG_HEADERS });
 
-      // Step 2: market data for the first 50
-      const ids = newCoins.slice(0, 50).map(c => c.id).join(',');
-      const marketsRes = await fetch(
-        `https://api.coingecko.com/api/v3/coins/markets?vs_currency=usd&ids=${ids}&order=market_cap_desc&per_page=50&page=1&sparkline=false&price_change_percentage=1h,24h,7d`,
-        { headers: { Accept: 'application/json' } },
-      );
-      const markets = Array.isArray(await marketsRes.json()) ? await marketsRes.clone().json() : [];
+      if (newCoinsRes.ok) {
+        // Primary path — exact listing timestamps available
+        const newCoins = await newCoinsRes.json();
+        const ids = newCoins.slice(0, 50).map(c => c.id).join(',');
+        const marketsRes = await fetch(
+          `${CG_BASE}/coins/markets?vs_currency=usd&ids=${ids}&order=market_cap_desc&per_page=50&page=1&sparkline=false&price_change_percentage=24h,7d`,
+          { headers: CG_HEADERS },
+        );
+        const markets = marketsRes.ok ? await marketsRes.json() : [];
+        const activatedMap = Object.fromEntries(newCoins.map(c => [c.id, c.activated_at]));
+        data = (Array.isArray(markets) ? markets : [])
+          .map(coin => ({ ...coin, listedAt: activatedMap[coin.id] || null }));
+      } else {
+        // Fallback — small-cap coins filtered by recent atl_date
+        console.warn(`[Listings] /coins/list/new returned ${newCoinsRes.status}, using fallback`);
+        const r = await fetch(
+          `${CG_BASE}/coins/markets?vs_currency=usd&order=market_cap_asc&per_page=250&page=1&sparkline=false&price_change_percentage=24h,7d`,
+          { headers: CG_HEADERS },
+        );
+        if (!r.ok) throw new Error(`CoinGecko /coins/markets → ${r.status}`);
+        const coins = await r.json();
+        if (!Array.isArray(coins)) throw new Error('Unexpected CoinGecko response');
 
-      // Merge listed-at timestamp from Step 1
-      const activatedMap = Object.fromEntries(newCoins.map(c => [c.id, c.activated_at]));
-      data = markets.map(coin => ({ ...coin, listedAt: activatedMap[coin.id] || null }));
+        const cutoff = new Date(Date.now() - 90 * 24 * 60 * 60 * 1000);
+        const recent = coins
+          .filter(c => c.atl_date && new Date(c.atl_date) >= cutoff)
+          .sort((a, b) => new Date(b.atl_date) - new Date(a.atl_date))
+          .slice(0, 60);
+
+        data = (recent.length >= 5 ? recent : coins.slice(0, 60))
+          .map(c => ({ ...c, listedAt: c.atl_date || null }));
+      }
 
       setCached(cacheKey, data, TTL_CEX);
     }
@@ -132,8 +152,8 @@ export const getCoinDetail = async (req, res) => {
 
     if (!raw) {
       const r = await fetch(
-        `https://api.coingecko.com/api/v3/coins/${id}?localization=false&tickers=false&market_data=true&community_data=true&developer_data=false&sparkline=false`,
-        { headers: { Accept: 'application/json' } },
+        `${CG_BASE}/coins/${id}?localization=false&tickers=false&market_data=true&community_data=true&developer_data=false&sparkline=false`,
+        { headers: CG_HEADERS },
       );
       if (!r.ok) return res.status(404).json({ success: false, message: 'Coin not found' });
       raw = await r.json();
