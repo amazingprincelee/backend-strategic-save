@@ -77,14 +77,22 @@ const ALLOWED_ORIGINS = [
   'https://www.smartstrategy.trade',
   'http://localhost:5173',
   'http://localhost:3000',
-  'https://www.gate.com/',
 ];
 
+// Origin function — reflects the matched origin back so credentials work correctly.
+// A plain array can sometimes fall back to the first entry; this is explicit.
+const corsOriginFn = (origin, callback) => {
+  // Allow requests with no origin (mobile apps, curl, server-to-server)
+  if (!origin || ALLOWED_ORIGINS.includes(origin)) {
+    callback(null, origin || true);
+  } else {
+    callback(new Error(`CORS: origin ${origin} not allowed`));
+  }
+};
 
 // ─────────────────────────────────────────────────────────────────────────────
 
 // Log every request with its Origin header — development only.
-// In production this runs on every request and creates constant GC pressure.
 if (process.env.NODE_ENV !== 'production') {
   app.use((req, res, next) => {
     console.log(`[REQ] ${req.method} ${req.path} | origin: ${req.headers.origin || 'none'}`);
@@ -94,7 +102,7 @@ if (process.env.NODE_ENV !== 'production') {
 
 // CORS
 app.use(cors({
-  origin: ALLOWED_ORIGINS ,
+  origin: corsOriginFn,
   credentials: true,
   methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
   allowedHeaders: ['Content-Type', 'Authorization'],
@@ -105,7 +113,7 @@ app.use(cors({
 // Initialize Socket.IO
 const io = new Server(server, {
   cors: {
-    origin: ALLOWED_ORIGINS,
+    origin: corsOriginFn,
     credentials: true,
     methods: ['GET', 'POST'],
     allowedHeaders: ['Content-Type', 'Authorization'],
