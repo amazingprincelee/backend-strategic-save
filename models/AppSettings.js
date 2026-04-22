@@ -48,6 +48,29 @@ const appSettingsSchema = new mongoose.Schema({
   cryptopayApiSecret:       { type: String, default: '' },
   cryptopayCallbackSecret:  { type: String, default: '' },
 
+  // ── Trade4Me Investment Settings ─────────────────────────────────────────────
+  trade4me: {
+    tiers: {
+      starter: {
+        apy:       { type: Number, default: 15 },
+        minAmount: { type: Number, default: 30 },
+        enabled:   { type: Boolean, default: true },
+      },
+      growth: {
+        apy:       { type: Number, default: 18 },
+        minAmount: { type: Number, default: 500 },
+        enabled:   { type: Boolean, default: true },
+      },
+      premium: {
+        apy:       { type: Number, default: 20 },
+        minAmount: { type: Number, default: 2000 },
+        enabled:   { type: Boolean, default: true },
+      },
+    },
+    lockDays:             { type: Number,  default: 30 },
+    acceptingInvestments: { type: Boolean, default: true },
+  },
+
   updatedBy: { type: mongoose.Schema.Types.ObjectId, ref: 'User', default: null },
 }, { timestamps: true });
 

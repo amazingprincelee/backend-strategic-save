@@ -1,18 +1,78 @@
-import Investment, { TIERS } from '../models/Investment.js';
+import Investment, { TIERS as DEFAULT_TIERS } from '../models/Investment.js';
 import InvestmentWithdrawal from '../models/InvestmentWithdrawal.js';
 import User from '../models/User.js';
 import { getPaymentKeys } from '../services/payment/paymentKeys.js';
+import { getSettings } from '../models/AppSettings.js';
+
+// Build effective tier config: DB settings override hardcoded defaults
+async function getEffectiveTiers() {
+  try {
+    const s = await getSettings();
+    const db = s?.trade4me?.tiers;
+    if (!db) return DEFAULT_TIERS;
+    return {
+      starter: {
+        apy:       db.starter?.apy       ?? DEFAULT_TIERS.starter.apy,
+        minAmount: db.starter?.minAmount ?? DEFAULT_TIERS.starter.minAmount,
+        enabled:   db.starter?.enabled   ?? true,
+      },
+      growth: {
+        apy:       db.growth?.apy       ?? DEFAULT_TIERS.growth.apy,
+        minAmount: db.growth?.minAmount ?? DEFAULT_TIERS.growth.minAmount,
+        enabled:   db.growth?.enabled   ?? true,
+      },
+      premium: {
+        apy:       db.premium?.apy       ?? DEFAULT_TIERS.premium.apy,
+        minAmount: db.premium?.minAmount ?? DEFAULT_TIERS.premium.minAmount,
+        enabled:   db.premium?.enabled   ?? true,
+      },
+    };
+  } catch {
+    return DEFAULT_TIERS;
+  }
+}
+
+// GET /api/investment/settings  — public, returns current tier config + platform settings
+export const getT4MSettings = async (req, res) => {
+  try {
+    const s = await getSettings();
+    const tiers = await getEffectiveTiers();
+    res.json({
+      success: true,
+      data: {
+        tiers,
+        lockDays:             s?.trade4me?.lockDays             ?? 30,
+        acceptingInvestments: s?.trade4me?.acceptingInvestments ?? true,
+      },
+    });
+  } catch (err) {
+    res.status(500).json({ success: false, message: err.message });
+  }
+};
 
 // GET /api/investment/dashboard
 export const getDashboard = async (req, res) => {
   try {
-    const investments = await Investment.find({ userId: req.user.id }).sort({ createdAt: -1 });
-    const withdrawals = await InvestmentWithdrawal.find({ userId: req.user.id })
-      .sort({ requestedAt: -1 })
-      .limit(20)
-      .populate('investmentId', 'tier amount apy');
+    const [investments, withdrawals, settings] = await Promise.all([
+      Investment.find({ userId: req.user.id }).sort({ createdAt: -1 }),
+      InvestmentWithdrawal.find({ userId: req.user.id })
+        .sort({ requestedAt: -1 })
+        .limit(20)
+        .populate('investmentId', 'tier amount apy'),
+      getSettings(),
+    ]);
 
-    res.json({ success: true, data: { investments, withdrawals, tiers: TIERS } });
+    const tiers = await getEffectiveTiers();
+    res.json({
+      success: true,
+      data: {
+        investments,
+        withdrawals,
+        tiers,
+        lockDays: settings?.trade4me?.lockDays ?? 30,
+        acceptingInvestments: settings?.trade4me?.acceptingInvestments ?? true,
+      },
+    });
   } catch (err) {
     res.status(500).json({ success: false, message: err.message });
   }
@@ -23,8 +83,17 @@ export const apply = async (req, res) => {
   try {
     const { tier, amount } = req.body;
 
+    const [TIERS, settings] = await Promise.all([getEffectiveTiers(), getSettings()]);
+
+    if (!settings?.trade4me?.acceptingInvestments) {
+      return res.status(403).json({ success: false, message: 'New investments are temporarily paused.' });
+    }
+
     if (!TIERS[tier]) {
       return res.status(400).json({ success: false, message: 'Invalid tier' });
+    }
+    if (!TIERS[tier].enabled) {
+      return res.status(400).json({ success: false, message: `The ${tier} tier is currently unavailable.` });
     }
     const numAmount = Number(amount);
     if (!numAmount || numAmount < TIERS[tier].minAmount) {

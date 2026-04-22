@@ -1,12 +1,15 @@
 import express from 'express';
 import crypto from 'crypto';
 import { authenticate, requireAdmin } from '../middleware/auth.js';
-import { getDashboard, apply, requestWithdrawal } from '../controllers/investmentController.js';
-import { getStats, listInvestors, listWithdrawals, updateWithdrawal } from '../controllers/adminInvestmentController.js';
+import { getDashboard, apply, requestWithdrawal, getT4MSettings } from '../controllers/investmentController.js';
+import { getStats, listInvestors, listWithdrawals, updateWithdrawal, accrueEarnings } from '../controllers/adminInvestmentController.js';
 import Investment from '../models/Investment.js';
 import { getPaymentKeys } from '../services/payment/paymentKeys.js';
 
 const router = express.Router();
+
+// ── Public settings (tier config for the Trade4Me page) ──────────────────────
+router.get('/settings', getT4MSettings);
 
 // ── User routes ───────────────────────────────────────────────────────────────
 router.get('/dashboard', authenticate, getDashboard);
@@ -66,9 +69,10 @@ router.post('/webhook', async (req, res) => {
 });
 
 // ── Admin routes ──────────────────────────────────────────────────────────────
-router.get('/admin/stats',            authenticate, requireAdmin, getStats);
-router.get('/admin/list',             authenticate, requireAdmin, listInvestors);
-router.get('/admin/withdrawals',      authenticate, requireAdmin, listWithdrawals);
-router.put('/admin/withdrawal/:id',   authenticate, requireAdmin, updateWithdrawal);
+router.get('/admin/stats',              authenticate, requireAdmin, getStats);
+router.get('/admin/list',               authenticate, requireAdmin, listInvestors);
+router.get('/admin/withdrawals',        authenticate, requireAdmin, listWithdrawals);
+router.put('/admin/withdrawal/:id',     authenticate, requireAdmin, updateWithdrawal);
+router.post('/admin/accrue-earnings',   authenticate, requireAdmin, accrueEarnings);
 
 export default router;

@@ -1,5 +1,6 @@
 import Investment from '../models/Investment.js';
 import InvestmentWithdrawal from '../models/InvestmentWithdrawal.js';
+import { getSettings } from '../models/AppSettings.js';
 
 // GET /api/investment/admin/stats
 export const getStats = async (req, res) => {
@@ -67,6 +68,30 @@ export const listWithdrawals = async (req, res) => {
       .populate('investmentId', 'tier amount apy totalEarnings');
 
     res.json({ success: true, data: { withdrawals, total } });
+  } catch (err) {
+    res.status(500).json({ success: false, message: err.message });
+  }
+};
+
+// POST /api/investment/admin/accrue-earnings — manual trigger for daily earnings
+export const accrueEarnings = async (req, res) => {
+  try {
+    const investments = await Investment.find({ status: 'active' });
+    let updated = 0;
+    const now = new Date();
+
+    for (const inv of investments) {
+      const balance      = inv.amount + inv.totalEarnings;
+      const dailyEarning = balance * (inv.apy / 100 / 365);
+      await Investment.findByIdAndUpdate(inv._id, {
+        $inc: { totalEarnings: dailyEarning },
+        lastEarningsDate: now,
+      });
+      updated++;
+    }
+
+    console.log(`[Trade4Me] Manual accrual: updated ${updated} investments`);
+    res.json({ success: true, data: { updated, accrualTime: now } });
   } catch (err) {
     res.status(500).json({ success: false, message: err.message });
   }

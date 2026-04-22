@@ -107,7 +107,7 @@ router.put('/settings', adminActionLimiter, async (req, res) => {
       'activePaymentProvider', 'premiumPriceUSD', 'premiumDurationDays',
       'referralRewardPercent', 'freeSignalsPerDay', 'freeSignalMaxConfidence',
       'freeArbitrageLimit', 'freeArbitrageMaxProfit', 'maintenanceMode',
-      'freeTrialDays', 'minWithdrawalAmount',
+      'freeTrialDays', 'minWithdrawalAmount', 'trade4me',
     ];
     const update = {};
     for (const key of allowed) {

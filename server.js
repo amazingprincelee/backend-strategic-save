@@ -29,6 +29,9 @@ import paymentRoutes      from './routes/payments.js';
 import supportRoutes     from './routes/support.js';
 import withdrawalRoutes  from './routes/withdrawals.js';
 import investmentRoutes  from './routes/investment.js';
+import listingsRoutes    from './routes/newListings.js';
+import alphaRoutes       from './routes/alpha.js';
+import tradeCallRoutes   from './routes/tradeCalls.js';
 
 // Import services
 import emailService from './utils/emailService.js';
@@ -70,7 +73,8 @@ const server = createServer(app);
 // some versions of the `cors` package fall back to the first entry when no
 // match is found, which causes the localhost CORS error you saw.
 const ALLOWED_ORIGINS = [
-  'https://smartstrategy.vercel.app',
+  'https://smartstrategy.trade',
+  'https://www.smartstrategy.trade',
   'http://localhost:5173',
   'http://localhost:3000',
   'https://www.gate.com/',
@@ -173,6 +177,9 @@ app.use('/api/payments',         paymentRoutes);
 app.use('/api/support',          supportRoutes);
 app.use('/api/withdrawals',      withdrawalRoutes);
 app.use('/api/investment',       investmentRoutes);
+app.use('/api/listings',         listingsRoutes);
+app.use('/api/alpha',            alphaRoutes);
+app.use('/api/trade-calls',      tradeCallRoutes);
 
 // Root endpoint
 app.get('/', (req, res) => {
@@ -556,6 +563,11 @@ const startServer = async () => {
       );
     });
     console.log('✅ Exchange pairs monthly refresh scheduled (1st of each month, 4 AM UTC)');
+
+    // Trade Calls — check open calls against live prices every 5 minutes
+    const { checkAndResolveOpenCalls } = await import('./controllers/tradeCallController.js');
+    cron.schedule('*/5 * * * *', () => checkAndResolveOpenCalls(io).catch(e => console.warn('[TradeCall] Cron error:', e.message)));
+    console.log('✅ Trade Calls price check scheduled (every 5 minutes)');
 
   } catch (error) {
     console.error('❌ Failed to start server:', error);
