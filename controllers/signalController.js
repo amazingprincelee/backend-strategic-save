@@ -23,6 +23,9 @@ function isPremiumUser(req) {
     if (!expiry) return true;                        // manual/lifetime grant
     return new Date() < new Date(expiry);
   }
+  if (u.subscription?.status === 'trial') {
+    return u.subscription.expiresAt && new Date() < new Date(u.subscription.expiresAt);
+  }
   return false;
 }
 
@@ -264,6 +267,14 @@ export const getSignalHistory = async (req, res) => {
 
 export const analyzeSignal = async (req, res) => {
   try {
+    if (!isPremiumUser(req)) {
+      return res.status(403).json({
+        success: false,
+        message: 'Premium feature',
+        code: 'TRIAL_EXPIRED',
+      });
+    }
+
     const { symbol = 'BTCUSDT', timeframe = '1h', marketType = 'spot' } = req.body;
 
     // Normalise symbol (accept BTC/USDT, BTCUSDT, btcusdt, etc.)

@@ -10,6 +10,7 @@ import Signal from '../models/Signal.js';
 import AuditLog, { logAdminAction } from '../models/AuditLog.js';
 import { getSettings } from '../models/AppSettings.js';
 import AppSettings from '../models/AppSettings.js';
+import jwt from 'jsonwebtoken';
 
 // Get platform statistics
 export const getPlatformStats = async (req, res) => {
@@ -566,50 +567,85 @@ export const getAuditLogs = async (req, res) => {
   }
 };
 
-// ── Grant free trial to a user ────────────────────────────────────────────────
+// ── Grant free trial — supports single users, multiple users, or all free accounts ──
 export const grantFreeTrial = async (req, res) => {
   try {
-    const { userId, days } = req.body;
-    if (!userId) return res.status(400).json({ success: false, message: 'userId is required' });
+    const { userIds, all, days, note } = req.body;
+
+    if (!all && (!userIds || !userIds.length)) {
+      return res.status(400).json({ success: false, message: 'Provide userIds array or set all:true' });
+    }
 
     const settings  = await getSettings();
-    const trialDays = days || settings.freeTrialDays || 7;
+    const trialDays = Math.max(1, Math.min(parseInt(days) || settings.freeTrialDays || 7, 365));
 
-    const user = await User.findById(userId);
-    if (!user) return res.status(404).json({ success: false, message: 'User not found' });
+    // Resolve target users
+    let users;
+    if (all) {
+      users = await User.find({
+        role: { $nin: ['admin', 'premium'] },
+        $or: [
+          { 'subscription.status': { $in: ['expired', 'cancelled', 'pending', null] } },
+          { 'subscription.status': { $exists: false } },
+        ],
+      }).select('_id email fullName subscription pendingTrial');
+    } else {
+      users = await User.find({ _id: { $in: userIds } })
+        .select('_id email fullName subscription pendingTrial');
+    }
 
-    const now = new Date();
-    const expiresAt = new Date(now.getTime() + trialDays * 86400000);
+    if (!users.length) {
+      return res.status(404).json({ success: false, message: 'No eligible users found' });
+    }
 
-    user.subscription.plan      = 'premium';
-    user.subscription.status    = 'trial';
-    user.subscription.startedAt = now;
-    user.subscription.expiresAt = expiresAt;
-    await user.save();
+    const claimWindowDays = 7;
+    const now             = new Date();
+    const claimExpiresAt  = new Date(now.getTime() + claimWindowDays * 86400000);
+    const adminId         = req.user._id || req.user.id;
 
-    // Notify user
-    try {
-      await emailService.sendEmail(
-        user.email,
-        `🎁 You've been granted a ${trialDays}-day free trial — SmartStrategy`,
-        `<p>Hello ${user.fullName || 'there'},</p>
-         <p>Great news! You have been granted a <strong>${trialDays}-day free trial</strong> of SmartStrategy Premium.</p>
-         <p>Your trial expires on <strong>${expiresAt.toDateString()}</strong>.</p>
-         <p>Enjoy full access to all premium features including real-time signals, arbitrage opportunities, and live trading bots.</p>
-         <p><a href="${process.env.CLIENT_URL}/dashboard">Go to Dashboard →</a></p>`,
-      );
-    } catch (e) { /* best-effort */ }
+    const results = { sent: 0, failed: 0, skipped: 0 };
+
+    for (const user of users) {
+      try {
+        // Generate a short-lived signed claim token
+        const token = jwt.sign(
+          { userId: user._id.toString(), days: trialDays, type: 'trial_claim' },
+          process.env.JWT_SECRET,
+          { expiresIn: `${claimWindowDays}d` }
+        );
+
+        user.pendingTrial = {
+          token,
+          days: trialDays,
+          note: note || null,
+          grantedByAdmin: adminId,
+          grantedAt: now,
+          claimExpiresAt,
+        };
+        await user.save();
+
+        const activationUrl = `${process.env.CLIENT_URL}/activate-trial?token=${token}`;
+        await emailService.sendTrialGrantEmail(user, activationUrl, trialDays, note);
+        results.sent++;
+      } catch (e) {
+        console.error(`[Admin] grantFreeTrial error for ${user.email}:`, e.message);
+        results.failed++;
+      }
+    }
 
     await logAdminAction({
-      adminId: req.user.id, adminEmail: req.user.email,
+      adminId, adminEmail: req.user.email,
       action: 'trial_granted',
-      targetUserId: userId, targetEmail: user.email,
-      description: `Granted ${trialDays}-day free trial. Expires: ${expiresAt.toDateString()}`,
-      metadata: { trialDays, expiresAt },
+      description: `Granted ${trialDays}-day trial claim to ${results.sent} user(s). Failed: ${results.failed}`,
+      metadata: { trialDays, all: !!all, userIds: userIds || 'all', results, note },
       ip: req.ip,
     });
 
-    res.json({ success: true, message: `${trialDays}-day trial granted to ${user.email}`, data: { expiresAt } });
+    res.json({
+      success: true,
+      message: `Trial emails sent to ${results.sent} user(s)${results.failed ? `, ${results.failed} failed` : ''}`,
+      data: { ...results, total: users.length, trialDays, claimExpiresAt },
+    });
   } catch (err) {
     console.error('[Admin] grantFreeTrial:', err.message);
     res.status(500).json({ success: false, message: 'Failed to grant trial' });

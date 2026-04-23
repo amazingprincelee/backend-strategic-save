@@ -1,4 +1,5 @@
 import bcrypt from 'bcryptjs';
+import jwt from 'jsonwebtoken';
 import { User } from '../models/index.js';
 import { generateAccessToken, generateRefreshToken, verifyToken } from '../utils/jwt.js';
 import {
@@ -78,14 +79,14 @@ export const googleCallback = async (req, res) => {
       }
     } else {
       // Create new user from Google profile
+      const googleTrialEnd = new Date(Date.now() + 3 * 24 * 60 * 60 * 1000);
       user = new User({
         email:        googleUser.email.toLowerCase(),
         fullName:     googleUser.name || '',
         googleId:     googleUser.sub,
         authProvider: 'google',
         role:         'user',
-        // Password field is required by schema but Google users don't use it
-        // Set a long random string they can never guess
+        subscription: { plan: 'free', status: 'trial', startedAt: new Date(), expiresAt: googleTrialEnd },
         password:     await bcrypt.hash(googleUser.sub + process.env.JWT_SECRET, 10),
       });
       await user.save();
@@ -142,12 +143,21 @@ export const register = async (req, res) => {
       if (referrer) referredBy = referralCode.toUpperCase().trim();
     }
 
+    // 3-day free trial for all new users
+    const trialEnd = new Date(Date.now() + 3 * 24 * 60 * 60 * 1000);
+
     // Create new user
     const userObj = {
       email: email.toLowerCase(),
       password: hashedPassword,
       fullName,
       role: 'user',
+      subscription: {
+        plan:      'free',
+        status:    'trial',
+        startedAt: new Date(),
+        expiresAt: trialEnd,
+      },
       ...(referredBy ? { referral: { referredBy } } : {}),
     };
 
@@ -174,6 +184,7 @@ export const register = async (req, res) => {
       email: user.email,
       profile: user.profile,
       role: user.role,
+      subscription: user.subscription,
       createdAt: user.createdAt
     };
 
@@ -245,6 +256,7 @@ export const login = async (req, res) => {
       walletAddress: user.walletAddress,
       profile: user.profile,
       role: user.role,
+      subscription: user.subscription,
       lastLogin: user.lastLogin,
       createdAt: user.createdAt
     };
@@ -359,6 +371,7 @@ export const getProfile = async (req, res) => {
       profile: user.profile,
       preferences: user.preferences,
       role: user.role,
+      subscription: user.subscription,
       lastLogin: user.lastLogin,
       createdAt: user.createdAt,
       updatedAt: user.updatedAt
@@ -473,18 +486,92 @@ export const updateProfile = async (req, res) => {
 // Logout user
 export const logout = async (req, res) => {
   try {
-    // In a real application, you might want to blacklist the token
-    // For now, we'll just return a success response
-    res.json({
-      success: true,
-      message: 'Logged out successfully'
-    });
-
+    res.json({ success: true, message: 'Logged out successfully' });
   } catch (error) {
     console.error('Logout error:', error);
-    res.status(500).json({
-      success: false,
-      message: 'Logout failed'
+    res.status(500).json({ success: false, message: 'Logout failed' });
+  }
+};
+
+// Activate a pending free trial via claim token
+export const activateTrial = async (req, res) => {
+  try {
+    const { token } = req.body;
+    if (!token) return res.status(400).json({ success: false, message: 'Token is required' });
+
+    // Verify the JWT claim token
+    let payload;
+    try {
+      payload = jwt.verify(token, process.env.JWT_SECRET);
+    } catch (e) {
+      const expired = e.name === 'TokenExpiredError';
+      return res.status(400).json({
+        success: false,
+        code: expired ? 'TOKEN_EXPIRED' : 'TOKEN_INVALID',
+        message: expired ? 'This trial link has expired.' : 'Invalid trial link.',
+      });
+    }
+
+    if (payload.type !== 'trial_claim') {
+      return res.status(400).json({ success: false, code: 'TOKEN_INVALID', message: 'Invalid trial link.' });
+    }
+
+    const user = await User.findById(payload.userId);
+    if (!user) return res.status(404).json({ success: false, message: 'User not found' });
+
+    // Check the stored token matches (one-time use guard)
+    if (!user.pendingTrial?.token || user.pendingTrial.token !== token) {
+      return res.status(400).json({
+        success: false,
+        code: 'ALREADY_CLAIMED',
+        message: 'This trial has already been activated or the link is no longer valid.',
+      });
+    }
+
+    // Check claim window
+    if (new Date() > new Date(user.pendingTrial.claimExpiresAt)) {
+      return res.status(400).json({ success: false, code: 'TOKEN_EXPIRED', message: 'This trial link has expired.' });
+    }
+
+    const trialDays = user.pendingTrial.days;
+    const now       = new Date();
+    const expiresAt = new Date(now.getTime() + trialDays * 86400000);
+
+    // Activate trial
+    user.subscription.plan      = 'free';
+    user.subscription.status    = 'trial';
+    user.subscription.startedAt = now;
+    user.subscription.expiresAt = expiresAt;
+
+    // Consume the pending trial (one-time use)
+    user.pendingTrial = {
+      token: null, days: null, note: null,
+      grantedByAdmin: null, grantedAt: null, claimExpiresAt: null,
+    };
+
+    await user.save();
+
+    // Return fresh tokens so UI can update immediately if user is logged in
+    const accessToken  = generateAccessToken(user);
+    const refreshToken = generateRefreshToken(user);
+
+    res.json({
+      success: true,
+      message: `Your ${trialDays}-day premium trial is now active!`,
+      data: {
+        trialDays,
+        expiresAt,
+        tokens: { accessToken, refreshToken },
+        user: {
+          id: user._id,
+          email: user.email,
+          role: user.role,
+          subscription: user.subscription,
+        },
+      },
     });
+  } catch (error) {
+    console.error('activateTrial error:', error);
+    res.status(500).json({ success: false, message: 'Failed to activate trial' });
   }
 };

@@ -7,6 +7,7 @@ import {
   getProfile,
   updateProfile,
   logout,
+  activateTrial,
   googleAuth,
   googleCallback,
 } from '../controllers/authController.js';
@@ -106,8 +107,10 @@ router.post('/logout',
   logout
 );
 
+// ── Trial activation (public — token is self-authenticating) ─────────────────
+router.post('/activate-trial', authLimiter, activateTrial);
+
 // ── Google OAuth ──────────────────────────────────────────────────────────────
-// No rate limiter here — Google itself rate-limits the OAuth consent screen
 router.get('/google',          googleAuth);
 router.get('/google/callback', googleCallback);
 

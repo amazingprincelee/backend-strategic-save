@@ -473,6 +473,145 @@ class EmailService {
       html
     );
   }
+
+  // ── Trial grant email (claim-on-click) ────────────────────────────────────────
+  async sendTrialGrantEmail(user, activationUrl, days, note) {
+    const firstName = (user.fullName || '').split(' ')[0] || 'there';
+    const claimDays = 7;
+
+    const html = `
+      <!DOCTYPE html>
+      <html lang="en">
+      <head>
+        <meta charset="utf-8">
+        <meta name="viewport" content="width=device-width, initial-scale=1.0">
+        <title>You've been gifted ${days} days of Premium — SmartStrategy</title>
+      </head>
+      <body style="margin:0;padding:0;background:#0d1117;font-family:'Segoe UI',Arial,sans-serif;">
+        <table width="100%" cellpadding="0" cellspacing="0" border="0" style="background:#0d1117;padding:40px 20px;">
+          <tr>
+            <td align="center">
+              <table width="600" cellpadding="0" cellspacing="0" border="0" style="max-width:600px;width:100%;">
+
+                <!-- Header accent bar -->
+                <tr>
+                  <td style="background:linear-gradient(90deg,#f59e0b,#ef4444,#f59e0b);height:4px;border-radius:4px 4px 0 0;"></td>
+                </tr>
+
+                <!-- Header -->
+                <tr>
+                  <td style="background:#161b22;padding:36px 40px 28px;border-radius:0;text-align:center;">
+                    <p style="margin:0 0 8px;font-size:13px;letter-spacing:3px;text-transform:uppercase;color:#f59e0b;font-weight:700;">SmartStrategy</p>
+                    <h1 style="margin:0;font-size:32px;font-weight:800;color:#ffffff;line-height:1.2;">
+                      You've been gifted<br>
+                      <span style="background:linear-gradient(90deg,#f59e0b,#fbbf24);-webkit-background-clip:text;-webkit-text-fill-color:transparent;background-clip:text;">${days} Days of Premium</span>
+                    </h1>
+                    <p style="margin:12px 0 0;font-size:15px;color:#8b949e;">Complimentary access — no credit card required</p>
+                  </td>
+                </tr>
+
+                <!-- Body -->
+                <tr>
+                  <td style="background:#0d1117;padding:36px 40px;">
+
+                    <p style="margin:0 0 20px;font-size:16px;color:#c9d1d9;">Hi <strong style="color:#ffffff;">${firstName}</strong>,</p>
+                    <p style="margin:0 0 24px;font-size:15px;color:#8b949e;line-height:1.7;">
+                      Our team has selected your account to receive a complimentary <strong style="color:#f59e0b;">${days}-day Premium trial</strong> of SmartStrategy — completely free, no payment needed.
+                    </p>
+
+                    ${note ? `
+                    <!-- Personal note -->
+                    <table width="100%" cellpadding="0" cellspacing="0" border="0" style="margin-bottom:28px;">
+                      <tr>
+                        <td style="background:#161b22;border-left:3px solid #f59e0b;padding:16px 20px;border-radius:0 8px 8px 0;">
+                          <p style="margin:0 0 4px;font-size:11px;text-transform:uppercase;letter-spacing:2px;color:#f59e0b;font-weight:700;">Message from the team</p>
+                          <p style="margin:0;font-size:14px;color:#c9d1d9;line-height:1.6;">${note}</p>
+                        </td>
+                      </tr>
+                    </table>` : ''}
+
+                    <!-- What you get -->
+                    <p style="margin:0 0 16px;font-size:13px;font-weight:700;text-transform:uppercase;letter-spacing:2px;color:#8b949e;">What's included</p>
+                    <table width="100%" cellpadding="0" cellspacing="0" border="0" style="margin-bottom:32px;">
+                      ${[
+                        ['AI-Powered Pair Analysis', 'Scan any trading pair with RSI, EMA, MACD & Bollinger Bands'],
+                        ['Live Trading Signals', 'Real-time spot & futures signals across 100+ pairs'],
+                        ['Expert Analyst Calls', 'Posted before the move — verified entry, TP & SL levels'],
+                        ['Arbitrage Opportunities', 'Cross-exchange price discrepancies, updated in real-time'],
+                        ['Live Bot Trading', 'Connect your exchange and automate your strategy'],
+                      ].map(([title, desc]) => `
+                      <tr>
+                        <td style="padding:10px 0;border-bottom:1px solid #21262d;">
+                          <table cellpadding="0" cellspacing="0" border="0">
+                            <tr>
+                              <td style="padding-right:14px;vertical-align:top;">
+                                <div style="width:20px;height:20px;border-radius:50%;background:linear-gradient(135deg,#f59e0b,#fbbf24);display:flex;align-items:center;justify-content:center;font-size:11px;color:#000;font-weight:800;text-align:center;line-height:20px;">✦</div>
+                              </td>
+                              <td>
+                                <p style="margin:0;font-size:14px;font-weight:700;color:#ffffff;">${title}</p>
+                                <p style="margin:2px 0 0;font-size:12px;color:#8b949e;">${desc}</p>
+                              </td>
+                            </tr>
+                          </table>
+                        </td>
+                      </tr>`).join('')}
+                    </table>
+
+                    <!-- CTA -->
+                    <table width="100%" cellpadding="0" cellspacing="0" border="0" style="margin-bottom:28px;">
+                      <tr>
+                        <td align="center" style="background:linear-gradient(135deg,#1a1006,#231508);border:1px solid rgba(245,158,11,0.3);border-radius:12px;padding:32px 24px;">
+                          <p style="margin:0 0 6px;font-size:13px;text-transform:uppercase;letter-spacing:2px;color:#f59e0b;font-weight:700;">Your exclusive offer</p>
+                          <p style="margin:0 0 24px;font-size:28px;font-weight:800;color:#ffffff;">${days} Days FREE</p>
+                          <a href="${activationUrl}"
+                             style="display:inline-block;background:linear-gradient(135deg,#f59e0b,#d97706);color:#000000;font-size:16px;font-weight:800;text-decoration:none;padding:16px 40px;border-radius:8px;letter-spacing:0.5px;">
+                            Activate Your Free Trial &rarr;
+                          </a>
+                          <p style="margin:16px 0 0;font-size:12px;color:#6e7681;">Link expires in ${claimDays} days &nbsp;·&nbsp; One click to activate &nbsp;·&nbsp; No card needed</p>
+                        </td>
+                      </tr>
+                    </table>
+
+                    <!-- Fallback link -->
+                    <p style="margin:0 0 8px;font-size:12px;color:#6e7681;">If the button doesn't work, paste this link into your browser:</p>
+                    <p style="margin:0 0 28px;font-size:11px;color:#f59e0b;word-break:break-all;">${activationUrl}</p>
+
+                    <p style="margin:0;font-size:14px;color:#8b949e;line-height:1.7;">
+                      Once activated, your ${days}-day countdown starts immediately. Enjoy every feature, no restrictions.
+                    </p>
+                  </td>
+                </tr>
+
+                <!-- Footer -->
+                <tr>
+                  <td style="background:#161b22;padding:24px 40px;border-radius:0 0 8px 8px;text-align:center;border-top:1px solid #21262d;">
+                    <p style="margin:0 0 8px;font-size:13px;color:#ffffff;font-weight:700;">SmartStrategy</p>
+                    <p style="margin:0;font-size:12px;color:#6e7681;">
+                      You're receiving this because an admin granted you a free trial.<br>
+                      Questions? Reply to this email and we'll help.
+                    </p>
+                  </td>
+                </tr>
+
+                <!-- Bottom accent bar -->
+                <tr>
+                  <td style="background:linear-gradient(90deg,#f59e0b,#ef4444,#f59e0b);height:3px;border-radius:0 0 4px 4px;"></td>
+                </tr>
+
+              </table>
+            </td>
+          </tr>
+        </table>
+      </body>
+      </html>
+    `;
+
+    return this.sendEmail(
+      user.email,
+      `🎁 You've been gifted ${days} days of Premium access — SmartStrategy`,
+      html
+    );
+  }
 }
 
 // Create singleton instance

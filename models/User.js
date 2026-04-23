@@ -95,6 +95,16 @@ const userSchema = new mongoose.Schema({
   googleId: { type: String, default: null, sparse: true },
   authProvider: { type: String, enum: ['local', 'google'], default: 'local' },
 
+  // ── Pending Trial Grant (claim-on-click flow) ────────────────────────────────
+  pendingTrial: {
+    token:          { type: String, default: null },
+    days:           { type: Number, default: null },
+    note:           { type: String, default: null },
+    grantedByAdmin: { type: mongoose.Schema.Types.ObjectId, ref: 'User', default: null },
+    grantedAt:      { type: Date, default: null },
+    claimExpiresAt: { type: Date, default: null },
+  },
+
 }, {
   timestamps: true
 });
