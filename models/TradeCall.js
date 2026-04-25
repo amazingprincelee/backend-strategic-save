@@ -16,7 +16,7 @@ export const COIN_ID_MAP = {
   BCH: 'bitcoin-cash', BSV: 'bitcoin-sv', LRC: 'loopring', ZIL: 'zilliqa',
   WAVES: 'waves', ALGO: 'algorand', EOS: 'eos', XTZ: 'tezos',
   CHZ: 'chiliz', ENJ: 'enjincoin', BAT: 'basic-attention-token',
-  GRT: 'the-graph', 1INCH: 'the-1inch-network', SUSHI: 'sushi',
+  GRT: 'the-graph', '1INCH': 'the-1inch-network', SUSHI: 'sushi',
   YFI: 'yearn-finance', BAL: 'balancer', REN: 'republic-protocol',
   CAKE: 'pancakeswap-token', TWT: 'trust-wallet-token',
   INJ: 'injective-protocol', RNDR: 'render-token', RENDER: 'render-token',
