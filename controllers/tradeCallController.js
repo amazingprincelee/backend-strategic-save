@@ -1,4 +1,5 @@
 import TradeCall, { pairToCoingeckoId } from '../models/TradeCall.js';
+import { priceMonitor } from '../services/tradeCallPriceMonitor.js';
 
 // ── Helpers ────────────────────────────────────────────────────────────────────
 
@@ -105,6 +106,9 @@ export const adminCreateCall = async (req, res) => {
       createdBy:   req.user._id,
     });
 
+    // Start monitoring this call immediately
+    priceMonitor.addCall(call.toObject());
+
     res.json({ success: true, data: call });
   } catch (err) {
     res.status(500).json({ success: false, message: err.message });
@@ -139,6 +143,13 @@ export const adminUpdateCall = async (req, res) => {
     const call = await TradeCall.findByIdAndUpdate(req.params.id, update, { new: true });
     if (!call) return res.status(404).json({ success: false, message: 'Not found' });
 
+    // Sync monitor: remove fully-closed calls, keep tp1_hit calls in watchlist
+    if (['win', 'loss', 'cancelled'].includes(update.status)) {
+      priceMonitor.removeCall(req.params.id);
+    } else if (update.status === 'tp1_hit') {
+      priceMonitor._markTp1Hit(req.params.id);
+    }
+
     res.json({ success: true, data: call });
   } catch (err) {
     res.status(500).json({ success: false, message: err.message });
@@ -149,106 +160,12 @@ export const adminUpdateCall = async (req, res) => {
 export const adminDeleteCall = async (req, res) => {
   try {
     await TradeCall.findByIdAndDelete(req.params.id);
+    priceMonitor.removeCall(req.params.id);
     res.json({ success: true });
   } catch (err) {
     res.status(500).json({ success: false, message: err.message });
   }
 };
 
-// ── Price check (called from cron + Socket.IO) ─────────────────────────────────
-
-export const checkAndResolveOpenCalls = async (io) => {
-  try {
-    const openCalls = await TradeCall.find({ status: { $in: ['open', 'tp1_hit'] } }).lean();
-    if (!openCalls.length) return;
-
-    // Unified pair → price map populated across sources
-    const pairPriceMap = {};
-
-    // 1. CoinGecko: batch-fetch for calls that have a coingeckoId
-    const cgIds = [...new Set(openCalls.map(c => c.coingeckoId).filter(Boolean))];
-    if (cgIds.length) {
-      try {
-        const r = await fetch(
-          `https://api.coingecko.com/api/v3/simple/price?ids=${cgIds.join(',')}&vs_currencies=usd`,
-          { headers: { Accept: 'application/json' } },
-        );
-        if (r.ok) {
-          const priceData = await r.json();
-          for (const call of openCalls) {
-            if (call.coingeckoId && priceData[call.coingeckoId]?.usd) {
-              pairPriceMap[call.pair] = priceData[call.coingeckoId].usd;
-            }
-          }
-        }
-      } catch (e) {
-        console.warn('[TradeCall] CoinGecko fetch failed:', e.message);
-      }
-    }
-
-    // 2. Binance fallback: fetch prices for any pairs still missing (individually
-    //    to avoid one bad symbol killing the whole batch request)
-    const missingPairs = [...new Set(
-      openCalls.filter(c => !pairPriceMap[c.pair]).map(c => c.pair),
-    )];
-    if (missingPairs.length) {
-      await Promise.all(missingPairs.map(async (symbol) => {
-        try {
-          const r = await fetch(
-            `https://api.binance.com/api/v3/ticker/price?symbol=${symbol}`,
-            { headers: { Accept: 'application/json' } },
-          );
-          if (!r.ok) return;
-          const { price } = await r.json();
-          if (price) pairPriceMap[symbol] = parseFloat(price);
-        } catch {
-          // symbol not on Binance — skip silently
-        }
-      }));
-    }
-
-    // Broadcast live prices to all connected clients
-    if (io && Object.keys(pairPriceMap).length) {
-      io.emit('tradecall:prices', pairPriceMap);
-    }
-
-    // Check and resolve open calls
-    for (const call of openCalls) {
-      const price = pairPriceMap[call.pair];
-      if (!price) continue;
-
-      const isLong = call.direction === 'long';
-      let update   = null;
-
-      if (isLong) {
-        if (price <= call.stopLoss) {
-          update = { status: 'loss', closedAt: new Date(), closingPrice: price };
-        } else if (!call.tp1Hit && price >= call.tp1) {
-          update = call.tp2
-            ? { status: 'tp1_hit', tp1Hit: true }
-            : { status: 'win', tp1Hit: true, closedAt: new Date(), closingPrice: price };
-        } else if (call.tp1Hit && call.tp2 && price >= call.tp2) {
-          update = { status: 'win', tp2Hit: true, closedAt: new Date(), closingPrice: price };
-        }
-      } else {
-        if (price >= call.stopLoss) {
-          update = { status: 'loss', closedAt: new Date(), closingPrice: price };
-        } else if (!call.tp1Hit && price <= call.tp1) {
-          update = call.tp2
-            ? { status: 'tp1_hit', tp1Hit: true }
-            : { status: 'win', tp1Hit: true, closedAt: new Date(), closingPrice: price };
-        } else if (call.tp1Hit && call.tp2 && price <= call.tp2) {
-          update = { status: 'win', tp2Hit: true, closedAt: new Date(), closingPrice: price };
-        }
-      }
-
-      if (update) {
-        await TradeCall.findByIdAndUpdate(call._id, update);
-        console.log(`[TradeCall] ${call.pair} → ${update.status} @ $${price}`);
-        if (io) io.emit('tradecall:resolved', { _id: String(call._id), pair: call.pair, ...update });
-      }
-    }
-  } catch (err) {
-    console.error('[TradeCall] Price check error:', err.message);
-  }
-};
+// checkAndResolveOpenCalls removed — replaced by priceMonitor service (tradeCallPriceMonitor.js)
+// which polls Binance every 5 s and CoinGecko every 30 s and runs 24/7 on the server.

@@ -47,6 +47,8 @@ import hybridSignalEngine    from './services/HybridSignalEngine.js';
 import signalDeliveryService from './services/SignalDeliveryService.js';
 // JWT utils (for socket handshake verification)
 import { verifyToken } from './utils/jwt.js';
+// Trade call real-time price monitor
+import { priceMonitor } from './services/tradeCallPriceMonitor.js';
 // Technical Analysis Engine + cron sweep
 import cron from 'node-cron';
 import { sweepTopPairs } from './services/TechnicalAnalysisEngine.js';
@@ -233,6 +235,12 @@ io.on('connection', (socket) => {
       console.log(`User ${userAddress} left their room`);
     }
   });
+
+  // Send currently known trade call prices immediately so client doesn't wait up to 5 s
+  const knownPrices = priceMonitor.pairPriceMap;
+  if (Object.keys(knownPrices).length) {
+    socket.emit('tradecall:prices', knownPrices);
+  }
 
   // Join signal tier room (premium = instant signals, free = 5-min delayed)
   socket.on('join-signals', ({ tier } = {}) => {
@@ -572,10 +580,8 @@ const startServer = async () => {
     });
     console.log('✅ Exchange pairs monthly refresh scheduled (1st of each month, 4 AM UTC)');
 
-    // Trade Calls — check open calls against live prices every 5 minutes
-    const { checkAndResolveOpenCalls } = await import('./controllers/tradeCallController.js');
-    cron.schedule('*/5 * * * *', () => checkAndResolveOpenCalls(io).catch(e => console.warn('[TradeCall] Cron error:', e.message)));
-    console.log('✅ Trade Calls price check scheduled (every 5 minutes)');
+    // Trade Calls — real-time price monitor (Binance every 5 s, CoinGecko fallback every 30 s)
+    await priceMonitor.start(io);
 
   } catch (error) {
     console.error('❌ Failed to start server:', error);
@@ -586,6 +592,7 @@ const startServer = async () => {
 // Graceful shutdown
 const gracefulShutdown = (signal) => {
   console.log(`\n🔴 Received ${signal}. Starting graceful shutdown...`);
+  priceMonitor.stop();
   
   // Check if server is listening before trying to close it
   if (server && server.listening) {
