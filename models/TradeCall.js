@@ -12,6 +12,17 @@ export const COIN_ID_MAP = {
   SAND: 'the-sandbox', MANA: 'decentraland', CRV: 'curve-dao-token',
   AAVE: 'aave', MKR: 'maker', SNX: 'havven', COMP: 'compound-governance-token',
   FIL: 'filecoin', ICP: 'internet-computer', HBAR: 'hedera-hashgraph',
+  ZEC: 'zcash', XMR: 'monero', DASH: 'dash', ETC: 'ethereum-classic',
+  BCH: 'bitcoin-cash', BSV: 'bitcoin-sv', LRC: 'loopring', ZIL: 'zilliqa',
+  WAVES: 'waves', ALGO: 'algorand', EOS: 'eos', XTZ: 'tezos',
+  CHZ: 'chiliz', ENJ: 'enjincoin', BAT: 'basic-attention-token',
+  GRT: 'the-graph', 1INCH: 'the-1inch-network', SUSHI: 'sushi',
+  YFI: 'yearn-finance', BAL: 'balancer', REN: 'republic-protocol',
+  CAKE: 'pancakeswap-token', TWT: 'trust-wallet-token',
+  INJ: 'injective-protocol', RNDR: 'render-token', RENDER: 'render-token',
+  SEI: 'sei-network', TIA: 'celestia', PYTH: 'pyth-network',
+  JUP: 'jupiter-exchange-solana', STRK: 'starknet', W: 'wormhole',
+  NEIRO: 'neiro-on-eth', DOGS: 'dogs-token', NOT: 'notcoin',
 };
 
 export function pairToCoingeckoId(pair) {

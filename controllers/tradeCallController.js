@@ -162,33 +162,59 @@ export const checkAndResolveOpenCalls = async (io) => {
     const openCalls = await TradeCall.find({ status: { $in: ['open', 'tp1_hit'] } }).lean();
     if (!openCalls.length) return;
 
-    const ids = [...new Set(openCalls.map(c => c.coingeckoId).filter(Boolean))];
-    if (!ids.length) return;
+    // Unified pair → price map populated across sources
+    const pairPriceMap = {};
 
-    const r = await fetch(
-      `https://api.coingecko.com/api/v3/simple/price?ids=${ids.join(',')}&vs_currencies=usd`,
-      { headers: { Accept: 'application/json' } },
-    );
-    if (!r.ok) return;
-
-    const priceData = await r.json();
-    const priceMap  = {};
-    for (const [id, data] of Object.entries(priceData)) priceMap[id] = data.usd;
-
-    // Broadcast live prices
-    const livePrices = {};
-    for (const call of openCalls) {
-      if (call.coingeckoId && priceMap[call.coingeckoId]) {
-        livePrices[call.pair] = priceMap[call.coingeckoId];
+    // 1. CoinGecko: batch-fetch for calls that have a coingeckoId
+    const cgIds = [...new Set(openCalls.map(c => c.coingeckoId).filter(Boolean))];
+    if (cgIds.length) {
+      try {
+        const r = await fetch(
+          `https://api.coingecko.com/api/v3/simple/price?ids=${cgIds.join(',')}&vs_currencies=usd`,
+          { headers: { Accept: 'application/json' } },
+        );
+        if (r.ok) {
+          const priceData = await r.json();
+          for (const call of openCalls) {
+            if (call.coingeckoId && priceData[call.coingeckoId]?.usd) {
+              pairPriceMap[call.pair] = priceData[call.coingeckoId].usd;
+            }
+          }
+        }
+      } catch (e) {
+        console.warn('[TradeCall] CoinGecko fetch failed:', e.message);
       }
     }
-    if (io && Object.keys(livePrices).length) {
-      io.emit('tradecall:prices', livePrices);
+
+    // 2. Binance fallback: fetch prices for any pairs still missing (individually
+    //    to avoid one bad symbol killing the whole batch request)
+    const missingPairs = [...new Set(
+      openCalls.filter(c => !pairPriceMap[c.pair]).map(c => c.pair),
+    )];
+    if (missingPairs.length) {
+      await Promise.all(missingPairs.map(async (symbol) => {
+        try {
+          const r = await fetch(
+            `https://api.binance.com/api/v3/ticker/price?symbol=${symbol}`,
+            { headers: { Accept: 'application/json' } },
+          );
+          if (!r.ok) return;
+          const { price } = await r.json();
+          if (price) pairPriceMap[symbol] = parseFloat(price);
+        } catch {
+          // symbol not on Binance — skip silently
+        }
+      }));
     }
 
-    // Check resolution conditions
+    // Broadcast live prices to all connected clients
+    if (io && Object.keys(pairPriceMap).length) {
+      io.emit('tradecall:prices', pairPriceMap);
+    }
+
+    // Check and resolve open calls
     for (const call of openCalls) {
-      const price = call.coingeckoId ? priceMap[call.coingeckoId] : null;
+      const price = pairPriceMap[call.pair];
       if (!price) continue;
 
       const isLong = call.direction === 'long';
