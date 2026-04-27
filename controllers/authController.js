@@ -2,6 +2,7 @@ import bcrypt from 'bcryptjs';
 import jwt from 'jsonwebtoken';
 import { User } from '../models/index.js';
 import { generateAccessToken, generateRefreshToken, verifyToken } from '../utils/jwt.js';
+import emailService from '../utils/emailService.js';
 import {
   userRegistrationSchema,
   userLoginSchema,
@@ -215,6 +216,35 @@ export const register = async (req, res) => {
     const accessToken = generateAccessToken(user);
     const refreshToken = generateRefreshToken(user);
 
+    // Send welcome email (non-blocking)
+    const firstName = fullName?.split(' ')[0] || 'Trader';
+    emailService.sendEmail(
+      user.email,
+      '🎉 Welcome to SmartStrategy — Your 3-Day Trial Has Started!',
+      `
+        <div style="font-family:sans-serif;max-width:560px;margin:0 auto;color:#1a1a2e">
+          <h2 style="color:#0e7490">Welcome to SmartStrategy, ${firstName}!</h2>
+          <p>Your account is ready and your <strong>3-day free trial</strong> has already started.</p>
+          <p>Here's what you get:</p>
+          <ul>
+            <li>📊 Real analyst trade calls with entry, TP & SL</li>
+            <li>🤖 AI signals across 30+ crypto pairs</li>
+            <li>⚡ Arbitrage scanner — cross-exchange & triangular</li>
+            <li>🔒 Automatic price monitor that closes trades for you</li>
+          </ul>
+          <p style="margin-top:24px">
+            <a href="${process.env.CLIENT_URL || 'https://smartstrategy.trade'}/dashboard"
+               style="background:#0e7490;color:white;padding:12px 28px;border-radius:8px;text-decoration:none;font-weight:bold;display:inline-block">
+              Go to Dashboard →
+            </a>
+          </p>
+          <p style="color:#6b7280;font-size:13px;margin-top:32px">
+            Questions? Reply to this email or reach us at contact@smartstrategy.trade
+          </p>
+        </div>
+      `
+    ).catch(err => console.error('[Welcome email] Failed:', err.message));
+
     // Remove sensitive data from response
     const userResponse = {
       id: user._id,
@@ -227,7 +257,7 @@ export const register = async (req, res) => {
 
     res.status(201).json({
       success: true,
-      message: 'Account created successfully! You can now log in.',
+      message: 'Account created successfully!',
       data: {
         user: userResponse,
         tokens: {
