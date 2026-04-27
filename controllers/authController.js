@@ -22,6 +22,8 @@ function buildGoogleRedirectUri() {
 
 // GET /api/auth/google — redirect user to Google consent screen
 export const googleAuth = (req, res) => {
+  // Encode referral code in `state` so Google echoes it back in the callback
+  const ref = (req.query.ref || '').trim().toUpperCase().slice(0, 20);
   const params = new URLSearchParams({
     client_id:     process.env.GOOGLE_CLIENT_ID,
     redirect_uri:  buildGoogleRedirectUri(),
@@ -29,6 +31,7 @@ export const googleAuth = (req, res) => {
     scope:         'openid email profile',
     access_type:   'online',
     prompt:        'select_account',
+    ...(ref ? { state: ref } : {}),
   });
   res.redirect(`${GOOGLE_AUTH_URL}?${params}`);
 };
@@ -37,8 +40,11 @@ export const googleAuth = (req, res) => {
 export const googleCallback = async (req, res) => {
   const clientUrl = process.env.CLIENT_URL || 'http://localhost:5173';
   try {
-    const { code } = req.query;
+    const { code, state } = req.query;
     if (!code) throw new Error('No code from Google');
+
+    // Recover referral code from OAuth state (set in googleAuth)
+    const refCode = (state || '').trim().toUpperCase() || null;
 
     // Exchange code for tokens
     const tokenRes = await fetch(GOOGLE_TOKEN_URL, {
@@ -93,6 +99,13 @@ export const googleCallback = async (req, res) => {
       }
       if (dirty) await user.save();
     } else {
+      // Resolve referral code (passed via OAuth state)
+      let referredBy = null;
+      if (refCode) {
+        const referrer = await User.findOne({ 'referral.code': refCode });
+        if (referrer) referredBy = refCode;
+      }
+
       // Create new user from Google profile
       const googleTrialEnd = new Date(Date.now() + 3 * 24 * 60 * 60 * 1000);
       user = new User({
@@ -103,8 +116,17 @@ export const googleCallback = async (req, res) => {
         role:         'user',
         subscription: { plan: 'free', status: 'trial', startedAt: new Date(), expiresAt: googleTrialEnd },
         password:     await bcrypt.hash(googleUser.sub + process.env.JWT_SECRET, 10),
+        ...(referredBy ? { referral: { referredBy } } : {}),
       });
       await user.save();
+
+      // Credit the referrer
+      if (referredBy) {
+        await User.findOneAndUpdate(
+          { 'referral.code': referredBy },
+          { $push: { 'referral.referrals': user._id } }
+        );
+      }
     }
 
     user.lastLogin = new Date();

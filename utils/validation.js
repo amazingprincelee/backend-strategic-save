@@ -12,10 +12,10 @@ export const emailSchema = yup
 export const passwordSchema = yup
   .string()
   .min(8, 'Password must be at least 8 characters long')
-  .matches(
-    /^(?=.*[a-z])(?=.*[A-Z])(?=.*\d)(?=.*[!@#$%^&*()_+\-=\[\]{};':"\\|,.<>\/?~`])[A-Za-z\d!@#$%^&*()_+\-=\[\]{};':"\\|,.<>\/?~`]*$/,
-    'Password must contain at least one uppercase letter, one lowercase letter, one number, and one special character'
-  )
+  .matches(/[a-z]/, 'Password must contain at least one lowercase letter')
+  .matches(/[A-Z]/, 'Password must contain at least one uppercase letter')
+  .matches(/\d/, 'Password must contain at least one number')
+  .matches(/[^a-zA-Z0-9]/, 'Password must contain at least one special character')
   .required('Password is required');
 
 
