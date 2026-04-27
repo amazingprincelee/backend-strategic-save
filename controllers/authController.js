@@ -70,19 +70,34 @@ export const googleCallback = async (req, res) => {
       ],
     });
 
+    // Best name from Google: prefer display name, fall back to given+family
+    const googleFullName = (
+      googleUser.name ||
+      [googleUser.given_name, googleUser.family_name].filter(Boolean).join(' ') ||
+      ''
+    ).trim();
+
     if (user) {
+      let dirty = false;
       // Link Google ID if not already set
       if (!user.googleId) {
         user.googleId     = googleUser.sub;
         user.authProvider = 'google';
-        await user.save();
+        dirty = true;
       }
+      // Update name whenever Google gives us a real name and the stored one
+      // looks like an email prefix (no spaces) or is empty
+      if (googleFullName && (!user.fullName || !user.fullName.trim().includes(' '))) {
+        user.fullName = googleFullName;
+        dirty = true;
+      }
+      if (dirty) await user.save();
     } else {
       // Create new user from Google profile
       const googleTrialEnd = new Date(Date.now() + 3 * 24 * 60 * 60 * 1000);
       user = new User({
         email:        googleUser.email.toLowerCase(),
-        fullName:     googleUser.name || '',
+        fullName:     googleFullName,
         googleId:     googleUser.sub,
         authProvider: 'google',
         role:         'user',
