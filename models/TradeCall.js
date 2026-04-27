@@ -39,20 +39,17 @@ const tradeCallSchema = new mongoose.Schema({
 
   entryPrice: { type: Number, required: true },
   stopLoss:   { type: Number, required: true },
-  tp1:        { type: Number, required: true },  // primary target (conservative)
-  tp2:        { type: Number, default: null },   // secondary target (optional)
+  tp1:        { type: Number, required: true },  // take-profit target
 
-  riskReward: { type: Number, default: null },   // calculated vs TP1
+  riskReward: { type: Number, default: null },
 
   notes: { type: String, default: '' },
 
   status: {
     type: String,
-    enum: ['open', 'tp1_hit', 'win', 'loss', 'cancelled'],
+    enum: ['open', 'win', 'loss', 'cancelled'],
     default: 'open',
   },
-  tp1Hit:  { type: Boolean, default: false },
-  tp2Hit:  { type: Boolean, default: false },
 
   openedAt:     { type: Date,   default: Date.now },
   closedAt:     { type: Date,   default: null },

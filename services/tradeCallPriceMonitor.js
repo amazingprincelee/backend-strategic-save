@@ -42,7 +42,7 @@ class TradeCallPriceMonitor {
   // ── Open-call cache management ───────────────────────────────────────────────
 
   async _loadOpenCalls() {
-    this.openCalls = await TradeCall.find({ status: { $in: ['open', 'tp1_hit'] } }).lean();
+    this.openCalls = await TradeCall.find({ status: 'open' }).lean();
   }
 
   /** Call after admin creates a new trade call */
@@ -50,14 +50,6 @@ class TradeCallPriceMonitor {
     if (!this.openCalls.find(c => String(c._id) === String(call._id))) {
       this.openCalls.push(call);
       console.log(`[PriceMonitor] Added ${call.pair} to watchlist`);
-    }
-  }
-
-  /** Call when a call reaches tp1_hit so the local cache reflects tp1Hit=true */
-  _markTp1Hit(id) {
-    const idx = this.openCalls.findIndex(c => String(c._id) === String(id));
-    if (idx !== -1) {
-      this.openCalls[idx] = { ...this.openCalls[idx], status: 'tp1_hit', tp1Hit: true };
     }
   }
 
@@ -202,22 +194,14 @@ class TradeCallPriceMonitor {
     if (isLong) {
       if (price <= call.stopLoss) {
         update = { status: 'loss', closedAt: new Date(), closingPrice: price };
-      } else if (!call.tp1Hit && price >= call.tp1) {
-        update = call.tp2
-          ? { status: 'tp1_hit', tp1Hit: true }
-          : { status: 'win', tp1Hit: true, closedAt: new Date(), closingPrice: price };
-      } else if (call.tp1Hit && call.tp2 && price >= call.tp2) {
-        update = { status: 'win', tp2Hit: true, closedAt: new Date(), closingPrice: price };
+      } else if (price >= call.tp1) {
+        update = { status: 'win',  closedAt: new Date(), closingPrice: price };
       }
     } else {
       if (price >= call.stopLoss) {
         update = { status: 'loss', closedAt: new Date(), closingPrice: price };
-      } else if (!call.tp1Hit && price <= call.tp1) {
-        update = call.tp2
-          ? { status: 'tp1_hit', tp1Hit: true }
-          : { status: 'win', tp1Hit: true, closedAt: new Date(), closingPrice: price };
-      } else if (call.tp1Hit && call.tp2 && price <= call.tp2) {
-        update = { status: 'win', tp2Hit: true, closedAt: new Date(), closingPrice: price };
+      } else if (price <= call.tp1) {
+        update = { status: 'win',  closedAt: new Date(), closingPrice: price };
       }
     }
 
@@ -225,17 +209,9 @@ class TradeCallPriceMonitor {
 
     this.resolvingIds.add(id);
     try {
-      if (update.status === 'tp1_hit') {
-        // Keep monitoring — call is still live waiting for TP2
-        this._markTp1Hit(id);
-      } else {
-        // Fully closed — stop watching
-        this.removeCall(id);
-      }
-
+      this.removeCall(id);
       await TradeCall.findByIdAndUpdate(call._id, update);
       console.log(`[PriceMonitor] ${call.pair} → ${update.status} @ $${price}`);
-
       if (this.io) {
         this.io.emit('tradecall:resolved', { _id: id, pair: call.pair, ...update });
       }
