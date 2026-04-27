@@ -63,8 +63,15 @@ const userSchema = new mongoose.Schema({
   },
   role: {
     type: String,
-    enum: ['user', 'premium', 'admin'],
+    enum: ['user', 'premium', 'admin', 'partner'],
     default: 'user'
+  },
+
+  // ── Partner Earnings (cash-withdrawable commissions) ─────────────────────────
+  partnerEarnings: {
+    pendingBalance: { type: Number, default: 0 }, // available to withdraw
+    totalEarned:    { type: Number, default: 0 }, // all-time gross commissions
+    totalWithdrawn: { type: Number, default: 0 }, // paid out
   },
 
   // ── Subscription ────────────────────────────────────────────────────────────
@@ -117,6 +124,7 @@ userSchema.index({ 'subscription.expiresAt': 1 });
 // Virtual: is user currently on premium?
 userSchema.virtual('isPremium').get(function () {
   if (this.role === 'admin') return true;
+  if (this.role === 'partner') return true;
   if (this.role === 'premium') return true;
   if (this.subscription?.plan === 'premium' && this.subscription?.status === 'active') {
     return this.subscription.expiresAt && new Date() < new Date(this.subscription.expiresAt);

@@ -36,8 +36,10 @@ const appSettingsSchema = new mongoose.Schema({
   announcementExpires: { type: Date, default: null },  // auto-hide after this date
 
   // Free trial settings
-  freeTrialDays:       { type: Number, default: 7 },
-  minWithdrawalAmount: { type: Number, default: 10 },  // minimum $USD referral withdrawal
+  freeTrialDays:             { type: Number, default: 7 },
+  minWithdrawalAmount:       { type: Number, default: 10 },  // minimum $USD referral withdrawal
+  partnerCommissionPercent:  { type: Number, default: 35 },  // % of payment awarded to partners
+  partnerMinWithdrawal:      { type: Number, default: 20 },  // minimum $USD partner withdrawal
 
   // Payment provider API keys (stored in DB so admin can update without server restart)
   nowpaymentsApiKey:        { type: String, default: '' },

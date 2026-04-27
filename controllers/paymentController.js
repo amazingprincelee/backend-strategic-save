@@ -6,6 +6,7 @@
 import User from '../models/User.js';
 import Subscription from '../models/Subscription.js';
 import Transaction from '../models/Transaction.js';
+import PartnerEarning from '../models/PartnerEarning.js';
 import { getSettings } from '../models/AppSettings.js';
 import coinbase  from '../services/payment/CoinbaseCommerceService.js';
 import nowpay   from '../services/payment/NOWPaymentsService.js';
@@ -134,33 +135,70 @@ async function activatePremiumInternal(userId, chargeId, provider, webhookPayloa
     { new: true }
   );
 
-  // ── Referral reward ────────────────────────────────────────────────────────
+  // ── Referral / Partner commission reward ───────────────────────────────────
   if (sub && !sub.referralRewarded && user.referral?.referredBy) {
     const referrer = await User.findOne({ 'referral.code': user.referral.referredBy });
     if (referrer) {
-      const percent = settings.referralRewardPercent ?? 25;
-      const reward  = Math.round((settings.premiumPriceUSD * percent / 100) * 100) / 100;
-      await User.findByIdAndUpdate(referrer._id, {
-        $inc: {
-          credits:                reward,
-          'referral.totalEarned': reward,
-        },
-      });
+      const amountPaid = settings.premiumPriceUSD ?? 29;
+
+      if (referrer.role === 'partner') {
+        // Partner earns cash-withdrawable commission (not platform credits)
+        const rate       = settings.partnerCommissionPercent ?? 35;
+        const commission = Math.round(amountPaid * rate / 100 * 100) / 100;
+        await User.findByIdAndUpdate(referrer._id, {
+          $inc: {
+            'partnerEarnings.pendingBalance': commission,
+            'partnerEarnings.totalEarned':    commission,
+          },
+        });
+        await PartnerEarning.create({
+          partnerId:         referrer._id,
+          referredUserId:    user._id,
+          referredUserEmail: user.email,
+          subscriptionId:    sub._id,
+          eventType:         'subscription',
+          amountPaidUSD:     amountPaid,
+          commissionUSD:     commission,
+          commissionRate:    rate,
+          status:            'pending',
+        });
+        try {
+          await emailService.sendEmail(
+            referrer.email,
+            `💰 You earned a $${commission} partner commission!`,
+            `<p>Hi ${referrer.fullName || 'there'},</p>
+             <p>Someone you referred just paid for SmartStrategy Premium. You've earned a <strong>$${commission} commission</strong> (${rate}% of $${amountPaid}).</p>
+             <p>Your available balance: <strong>$${((referrer.partnerEarnings?.pendingBalance || 0) + commission).toFixed(2)}</strong></p>
+             <p><a href="${process.env.CLIENT_URL}/partner">View your partner dashboard →</a></p>`,
+            `You earned a $${commission} partner commission. Balance: $${((referrer.partnerEarnings?.pendingBalance || 0) + commission).toFixed(2)}`
+          );
+        } catch (_) { /* non-critical */ }
+      } else {
+        // Regular user earns platform credits
+        const percent = settings.referralRewardPercent ?? 25;
+        const reward  = Math.round(amountPaid * percent / 100 * 100) / 100;
+        await User.findByIdAndUpdate(referrer._id, {
+          $inc: {
+            credits:                reward,
+            'referral.totalEarned': reward,
+          },
+        });
+        try {
+          await emailService.sendEmail(
+            referrer.email,
+            `🎉 You earned a $${reward} referral reward!`,
+            `<p>Hi ${referrer.fullName || 'there'},</p>
+             <p>Someone you referred just subscribed to SmartStrategy Premium! You've earned a <strong>$${reward} credit</strong>.</p>
+             <p>Your new credit balance: <strong>$${(referrer.credits || 0) + reward}</strong></p>`,
+            `You earned a $${reward} referral credit. Your balance: $${(referrer.credits || 0) + reward}`
+          );
+        } catch (_) { /* non-critical */ }
+      }
+
       await Subscription.findByIdAndUpdate(sub._id, {
         referralRewarded: true,
         referrerId: referrer._id,
       });
-      // Notify referrer
-      try {
-        await emailService.sendEmail(
-          referrer.email,
-          `🎉 You earned a $${reward} referral reward!`,
-          `<p>Hi ${referrer.fullName || 'there'},</p>
-           <p>Someone you referred just subscribed to SmartStrategy Premium! You've earned a <strong>$${reward} credit</strong>.</p>
-           <p>Your new credit balance: <strong>$${(referrer.credits || 0) + reward}</strong></p>`,
-          `You earned a $${reward} referral credit. Your balance: $${(referrer.credits || 0) + reward}`
-        );
-      } catch (_) { /* non-critical */ }
     }
   }
 

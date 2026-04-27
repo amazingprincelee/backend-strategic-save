@@ -32,6 +32,7 @@ import investmentRoutes  from './routes/investment.js';
 import listingsRoutes    from './routes/newListings.js';
 import alphaRoutes       from './routes/alpha.js';
 import tradeCallRoutes   from './routes/tradeCalls.js';
+import partnerRoutes     from './routes/partner.js';
 
 // Import services
 import emailService from './utils/emailService.js';
@@ -190,6 +191,7 @@ app.use('/api/investment',       investmentRoutes);
 app.use('/api/listings',         listingsRoutes);
 app.use('/api/alpha',            alphaRoutes);
 app.use('/api/trade-calls',      tradeCallRoutes);
+app.use('/api/partner',          partnerRoutes);
 
 // Root endpoint
 app.get('/', (req, res) => {

@@ -72,10 +72,21 @@ export const requireAdmin = (req, res, next) => {
   next();
 };
 
+// Middleware to check if user is a partner (or admin)
+export const requirePartner = (req, res, next) => {
+  if (req.user.role === 'admin' || req.user.role === 'partner') return next();
+  return res.status(403).json({
+    success: false,
+    message: 'Partner access required',
+    code: 'PARTNER_REQUIRED',
+  });
+};
+
 // Middleware to check if user has an active premium subscription
 export const requirePremium = (req, res, next) => {
   const u = req.user;
   if (u.role === 'admin') return next();
+  if (u.role === 'partner') return next(); // partners get full premium access
   if (u.role === 'premium') {
     // Also check subscription hasn't expired
     const expiry = u.subscription?.expiresAt;

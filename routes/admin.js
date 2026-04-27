@@ -23,6 +23,10 @@ import Subscription from '../models/Subscription.js';
 import AppSettings, { getSettings } from '../models/AppSettings.js';
 import { authenticate, requireAdmin } from '../middleware/auth.js';
 import { invalidatePaymentKeyCache } from '../services/payment/paymentKeys.js';
+import User from '../models/User.js';
+import PartnerEarning from '../models/PartnerEarning.js';
+import PartnerWithdrawal from '../models/PartnerWithdrawal.js';
+import emailService from '../utils/emailService.js';
 
 const router = express.Router();
 
@@ -202,5 +206,145 @@ router.put('/announcement', adminActionLimiter, updateAnnouncement);
 router.get('/transactions',       adminLimiter, listTransactions);
 router.get('/transactions/stats', adminLimiter, getTransactionStats);
 router.get('/transactions/:id',   adminLimiter, getTransactionDetail);
+
+// ─── Partner Management ──────────────────────────────────────────────────────
+
+// List all partners with earnings summary
+router.get('/partners', adminLimiter, authenticate, requireAdmin, async (req, res) => {
+  try {
+    const { page = 1, limit = 30, search = '' } = req.query;
+    const query = { role: 'partner' };
+    if (search) {
+      query.$or = [
+        { email: { $regex: search, $options: 'i' } },
+        { fullName: { $regex: search, $options: 'i' } },
+      ];
+    }
+    const [partners, total] = await Promise.all([
+      User.find(query)
+        .select('email fullName role referral partnerEarnings createdAt subscription')
+        .sort({ 'partnerEarnings.totalEarned': -1 })
+        .skip((page - 1) * limit)
+        .limit(Number(limit))
+        .lean(),
+      User.countDocuments(query),
+    ]);
+    const enriched = await Promise.all(partners.map(async p => {
+      const referredCount      = await User.countDocuments({ 'referral.referredBy': p.referral?.code });
+      const pendingWithdrawals = await PartnerWithdrawal.countDocuments({ partnerId: p._id, status: 'pending' });
+      return { ...p, referredCount, pendingWithdrawals };
+    }));
+    res.json({ success: true, data: enriched, total, page: Number(page), limit: Number(limit) });
+  } catch (err) {
+    res.status(500).json({ success: false, message: err.message });
+  }
+});
+
+// Grant partner role to a user
+router.post('/partners/:userId/grant', adminActionLimiter, authenticate, requireAdmin, async (req, res) => {
+  try {
+    const user = await User.findByIdAndUpdate(
+      req.params.userId,
+      { role: 'partner' },
+      { new: true }
+    ).select('email fullName role partnerEarnings referral');
+    if (!user) return res.status(404).json({ success: false, message: 'User not found' });
+    try {
+      await emailService.sendEmail(
+        user.email,
+        '🎉 You are now a SmartStrategy Partner!',
+        `<p>Hi ${user.fullName || 'there'},</p>
+         <p>Congratulations! You have been approved as a SmartStrategy Partner.</p>
+         <p>Your referral link: <strong>${process.env.CLIENT_URL}/register?ref=${user.referral?.code}</strong></p>
+         <p>You earn a commission on every payment made by users who sign up through your link — not just the first one.</p>
+         <p><a href="${process.env.CLIENT_URL}/partner">View your partner dashboard →</a></p>`,
+        `You are now a SmartStrategy Partner. Referral link: ${process.env.CLIENT_URL}/register?ref=${user.referral?.code}`
+      );
+    } catch (_) { /* non-critical */ }
+    res.json({ success: true, data: user, message: 'Partner role granted' });
+  } catch (err) {
+    res.status(500).json({ success: false, message: err.message });
+  }
+});
+
+// Revoke partner role
+router.post('/partners/:userId/revoke', adminActionLimiter, authenticate, requireAdmin, async (req, res) => {
+  try {
+    const user = await User.findById(req.params.userId);
+    if (!user) return res.status(404).json({ success: false, message: 'User not found' });
+    const newRole = user.subscription?.status === 'active' ? 'premium' : 'user';
+    await User.findByIdAndUpdate(req.params.userId, { role: newRole });
+    res.json({ success: true, message: `Partner role revoked. User is now '${newRole}'` });
+  } catch (err) {
+    res.status(500).json({ success: false, message: err.message });
+  }
+});
+
+// List all partner withdrawal requests
+router.get('/partners/withdrawals', adminLimiter, authenticate, requireAdmin, async (req, res) => {
+  try {
+    const { status = 'pending', page = 1, limit = 30 } = req.query;
+    const query = status === 'all' ? {} : { status };
+    const [withdrawals, total] = await Promise.all([
+      PartnerWithdrawal.find(query)
+        .populate('partnerId', 'email fullName referral partnerEarnings')
+        .sort({ createdAt: -1 })
+        .skip((page - 1) * limit)
+        .limit(Number(limit))
+        .lean(),
+      PartnerWithdrawal.countDocuments(query),
+    ]);
+    res.json({ success: true, data: withdrawals, total, page: Number(page), limit: Number(limit) });
+  } catch (err) {
+    res.status(500).json({ success: false, message: err.message });
+  }
+});
+
+// Approve, reject, or mark a withdrawal as paid
+router.put('/partners/withdrawals/:id', adminActionLimiter, authenticate, requireAdmin, async (req, res) => {
+  try {
+    const { action, adminNote = '', txHash = '' } = req.body;
+    if (!['approve', 'reject', 'mark_paid'].includes(action)) {
+      return res.status(400).json({ success: false, message: 'Invalid action' });
+    }
+    const withdrawal = await PartnerWithdrawal.findById(req.params.id).populate('partnerId');
+    if (!withdrawal) return res.status(404).json({ success: false, message: 'Withdrawal not found' });
+
+    if (action === 'reject') {
+      await User.findByIdAndUpdate(withdrawal.partnerId._id, {
+        $inc: { 'partnerEarnings.pendingBalance': withdrawal.amount },
+      });
+      Object.assign(withdrawal, { status: 'rejected', adminNote, processedAt: new Date() });
+    } else if (action === 'approve') {
+      Object.assign(withdrawal, { status: 'approved', adminNote, processedAt: new Date() });
+    } else if (action === 'mark_paid') {
+      await User.findByIdAndUpdate(withdrawal.partnerId._id, {
+        $inc: { 'partnerEarnings.totalWithdrawn': withdrawal.amount },
+      });
+      await PartnerEarning.updateMany(
+        { partnerId: withdrawal.partnerId._id, status: 'pending' },
+        { status: 'paid', paidAt: new Date() }
+      );
+      Object.assign(withdrawal, { status: 'paid', txHash, adminNote, processedAt: new Date() });
+      try {
+        const partner = withdrawal.partnerId;
+        await emailService.sendEmail(
+          partner.email,
+          `✅ Withdrawal of $${withdrawal.amount} sent!`,
+          `<p>Hi ${partner.fullName || 'there'},</p>
+           <p>Your withdrawal of <strong>$${withdrawal.amount}</strong> has been sent to your wallet.</p>
+           ${txHash ? `<p>TX hash: <code>${txHash}</code></p>` : ''}
+           <p><a href="${process.env.CLIENT_URL}/partner">View your partner dashboard →</a></p>`,
+          `Your withdrawal of $${withdrawal.amount} has been sent.`
+        );
+      } catch (_) { /* non-critical */ }
+    }
+
+    await withdrawal.save();
+    res.json({ success: true, data: withdrawal });
+  } catch (err) {
+    res.status(500).json({ success: false, message: err.message });
+  }
+});
 
 export default router;
