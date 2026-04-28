@@ -1,7 +1,7 @@
 import Investment, { TIERS as DEFAULT_TIERS } from '../models/Investment.js';
 import InvestmentWithdrawal from '../models/InvestmentWithdrawal.js';
 import User from '../models/User.js';
-import { getPaymentKeys } from '../services/payment/paymentKeys.js';
+import { getTrade4mePaymentKeys } from '../services/payment/paymentKeys.js';
 import { getSettings } from '../models/AppSettings.js';
 
 // Build effective tier config: DB settings override hardcoded defaults
@@ -115,8 +115,8 @@ export const apply = async (req, res) => {
       status: 'pending_payment',
     });
 
-    // Build NOWPayments invoice
-    const { nowpaymentsApiKey } = await getPaymentKeys();
+    // Build NOWPayments invoice (Trade4Me dedicated keys)
+    const { nowpaymentsApiKey } = await getTrade4mePaymentKeys();
     const orderId = `invest-${req.user.id}-${investment._id}-${Date.now()}`;
 
     const npRes = await fetch('https://api.nowpayments.io/v1/invoice', {

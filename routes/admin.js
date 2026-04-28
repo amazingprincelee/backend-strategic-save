@@ -167,6 +167,7 @@ router.get('/payment-keys/status', adminLimiter, async (req, res) => {
         nowpayments:  { apiKey: !!s.nowpaymentsApiKey, ipnSecret: !!s.nowpaymentsIpnSecret },
         coinbase:     { apiKey: !!s.coinbaseApiKey, webhookSecret: !!s.coinbaseWebhookSecret },
         cryptopay:    { apiKey: !!s.cryptopayApiKey, apiSecret: !!s.cryptopayApiSecret, callbackSecret: !!s.cryptopayCallbackSecret },
+        trade4me:     { apiKey: !!s.trade4meNowpaymentsApiKey, ipnSecret: !!s.trade4meNowpaymentsIpnSecret },
       },
     });
   } catch (e) {
@@ -180,6 +181,7 @@ router.put('/payment-keys', adminActionLimiter, async (req, res) => {
       'nowpaymentsApiKey', 'nowpaymentsIpnSecret',
       'coinbaseApiKey', 'coinbaseWebhookSecret',
       'cryptopayApiKey', 'cryptopayApiSecret', 'cryptopayCallbackSecret',
+      'trade4meNowpaymentsApiKey', 'trade4meNowpaymentsIpnSecret',
     ];
     const update = {};
     for (const key of allowed) {

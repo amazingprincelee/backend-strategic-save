@@ -4,7 +4,7 @@ import { authenticate, requireAdmin } from '../middleware/auth.js';
 import { getDashboard, apply, requestWithdrawal, getT4MSettings } from '../controllers/investmentController.js';
 import { getStats, listInvestors, listWithdrawals, updateWithdrawal, accrueEarnings } from '../controllers/adminInvestmentController.js';
 import Investment from '../models/Investment.js';
-import { getPaymentKeys } from '../services/payment/paymentKeys.js';
+import { getTrade4mePaymentKeys } from '../services/payment/paymentKeys.js';
 
 const router = express.Router();
 
@@ -19,7 +19,7 @@ router.post('/withdraw', authenticate, requestWithdrawal);
 // ── NOWPayments webhook (unauthenticated, raw body captured by server.js) ─────
 router.post('/webhook', async (req, res) => {
   try {
-    const { nowpaymentsIpnSecret } = await getPaymentKeys();
+    const { nowpaymentsIpnSecret } = await getTrade4mePaymentKeys();
 
     // Verify HMAC signature if secret is configured
     if (nowpaymentsIpnSecret) {

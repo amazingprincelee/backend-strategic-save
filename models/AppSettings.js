@@ -41,7 +41,7 @@ const appSettingsSchema = new mongoose.Schema({
   partnerCommissionPercent:  { type: Number, default: 35 },  // % of payment awarded to partners
   partnerMinWithdrawal:      { type: Number, default: 20 },  // minimum $USD partner withdrawal
 
-  // Payment provider API keys (stored in DB so admin can update without server restart)
+  // Payment provider API keys — subscriptions (operating revenue)
   nowpaymentsApiKey:        { type: String, default: '' },
   nowpaymentsIpnSecret:     { type: String, default: '' },
   coinbaseApiKey:           { type: String, default: '' },
@@ -49,6 +49,10 @@ const appSettingsSchema = new mongoose.Schema({
   cryptopayApiKey:          { type: String, default: '' },
   cryptopayApiSecret:       { type: String, default: '' },
   cryptopayCallbackSecret:  { type: String, default: '' },
+
+  // Trade4Me dedicated payment keys — separate account for investment custody
+  trade4meNowpaymentsApiKey:    { type: String, default: '' },
+  trade4meNowpaymentsIpnSecret: { type: String, default: '' },
 
   // ── Trade4Me Investment Settings ─────────────────────────────────────────────
   trade4me: {
