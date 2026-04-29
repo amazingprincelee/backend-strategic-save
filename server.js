@@ -277,7 +277,7 @@ const startServer = async () => {
 
     // Start listening IMMEDIATELY after DB connects so DO/cloud health checks pass.
     // All other services init in the background — the port is open within seconds.
-    const PORT = process.env.PORT || 5000;
+    const PORT = process.env.PORT || 3000;
     server.listen(PORT, () => {
       console.log(`\n${'='.repeat(50)}`);
       console.log(`🚀 Server running on port ${PORT}`);
